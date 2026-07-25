@@ -171,14 +171,27 @@ class MedicalTermMatcher:
             language_score = 0.7
         else:
             language_score = 0.4 if languages[0] == "und" else 0.0
-        score = (
-            0.40 * phonetic
-            + 0.20 * orthographic
-            + 0.10 * alias
-            + 0.10 * language_score
-            + 0.10 * asr_score
-            + 0.10 * entry.prior
-        )
+        if pronunciations:
+            scoring_profile = "phonetic_first"
+            score = (
+                0.40 * phonetic
+                + 0.20 * orthographic
+                + 0.10 * alias
+                + 0.10 * language_score
+                + 0.10 * asr_score
+                + 0.10 * entry.prior
+            )
+        else:
+            # Some scripts have no configured G2P engine. This explicit fallback is spelling-only;
+            # it must never be represented to reviewers as a fabricated pronunciation.
+            scoring_profile = "graphemic_fallback"
+            score = (
+                0.60 * orthographic
+                + 0.10 * alias
+                + 0.10 * language_score
+                + 0.10 * asr_score
+                + 0.10 * entry.prior
+            )
         breakdown = ScoreBreakdown(
             phonetic=round(phonetic, 4),
             orthographic=round(orthographic, 4),
@@ -188,6 +201,7 @@ class MedicalTermMatcher:
             prior=entry.prior,
             phonetic_feature=round(feature, 4),
             ipa_ngram=round(trigram, 4),
+            scoring_profile=scoring_profile,
         )
         return CandidateResult(
             concept_id=entry.concept_id,
@@ -224,19 +238,25 @@ class MedicalTermMatcher:
         language_confidence: float,
         has_pronunciation: bool,
     ) -> tuple[str, list[str]]:
-        if not has_pronunciation:
-            return "abstain", ["pronunciation_failed"]
         if language == "und" or scripts == ["Zyyy"]:
             return "abstain", ["language_or_script_unresolved"]
         if not candidates or candidates[0].score < self.review_threshold:
             return "abstain", ["below_review_threshold"]
-        reasons = ["candidate_above_review_threshold"]
+        if not has_pronunciation:
+            if candidates[0].score_breakdown.orthographic < 0.70:
+                return "abstain", ["pronunciation_failed", "weak_graphemic_evidence"]
+            reasons = [
+                "graphemic_candidate_above_review_threshold",
+                "pronunciation_unavailable",
+            ]
+        else:
+            reasons = ["candidate_above_review_threshold"]
         margin = candidates[0].score - (candidates[1].score if len(candidates) > 1 else 0.0)
         if margin < self.force_review_margin:
             reasons.append("low_margin")
         if candidates[0].risk_tier.casefold() in {"high", "lasa", "critical"}:
             reasons.append("high_risk_medication")
-        if len(scripts) > 1:
+        if len(scripts) > 1 and not set(scripts).issubset({"Hani", "Hira", "Kana"}):
             reasons.append("mixed_script")
         if language_confidence < 0.5:
             reasons.append("language_uncertain")

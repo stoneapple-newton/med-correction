@@ -268,7 +268,11 @@ def _coerce_records(records: list[dict[str, Any] | EvaluationRecord]) -> list[Ev
 
 
 def evaluate_records(
-    matcher: MedicalTermMatcher, records: list[dict[str, Any] | EvaluationRecord]
+    matcher: MedicalTermMatcher,
+    records: list[dict[str, Any] | EvaluationRecord],
+    *,
+    target_sensitivity: float = 0.95,
+    target_selectivity: float = 0.95,
 ) -> dict[str, Any]:
     validated = _coerce_records(records)
     metrics = EvaluationMetrics(records=len(validated))
@@ -416,6 +420,23 @@ def evaluate_records(
         tag: counts.report() for tag, counts in sorted(slice_correction_counts.items())
     }
     report["case_errors"] = case_errors
+    sensitivity = float(report["detection"]["overlap_recall"])
+    selectivity = round(1.0 - float(report["negative_record_false_positive_rate"]), 4)
+    report["targets"] = {
+        "definition": (
+            "sensitivity=overlap span recall; selectivity=1-negative-record false-positive rate"
+        ),
+        "sensitivity": {
+            "target": target_sensitivity,
+            "observed": sensitivity,
+            "met": sensitivity >= target_sensitivity,
+        },
+        "selectivity": {
+            "target": target_selectivity,
+            "observed": selectivity,
+            "met": selectivity >= target_selectivity,
+        },
+    }
     if references:
         report["wer"] = round(float(wer(references, hypotheses)), 4)
         report["cer"] = round(float(cer(references, hypotheses)), 4)

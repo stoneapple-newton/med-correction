@@ -3,7 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from medterm.models import MatchRequest, SpanEvidence
-from medterm.normalization import TextToken, detect_scripts, normalize_term, tokenize_with_offsets
+from medterm.normalization import (
+    TextToken,
+    detect_scripts,
+    has_suspicious_mixed_scripts,
+    normalize_term,
+    tokenize_with_offsets,
+)
 from medterm.terminology import DictionaryIndex
 
 
@@ -15,6 +21,7 @@ class DetectedSpan:
     token_start: int
     token_end: int
     evidence: SpanEvidence
+    retrieval_hint: float = 0.0
 
 
 class SuspiciousSpanDetector:
@@ -46,7 +53,7 @@ class SuspiciousSpanDetector:
                     else 0.0
                 )
                 disagreement = self._nbest_disagreement(request, span_text)
-                mixed_script = 1.0 if len(detect_scripts(span_text)) > 1 else 0.0
+                mixed_script = 1.0 if has_suspicious_mixed_scripts(span_text) else 0.0
                 boundary = self._boundary_risk(tokens, token_start, token_end, neighbor)
                 oov = 0.0 if exact else 1.0
                 neighbor_hint = 1.0 if neighbor >= 0.52 else 0.0
@@ -86,7 +93,46 @@ class SuspiciousSpanDetector:
                             evidence=evidence,
                         )
                     )
+        spans.extend(self._approximate_asian_spans(request))
         return self._select_nonredundant(spans, neighbor_scores)
+
+    def _approximate_asian_spans(self, request: MatchRequest) -> list[DetectedSpan]:
+        languages = self._asian_languages(request)
+        matches = self.index.find_approximate_asian_spans(request.text, languages)
+        return [
+            DetectedSpan(
+                text=request.text[match.start : match.end],
+                start=match.start,
+                end=match.end,
+                token_start=-(match.start + 1),
+                token_end=-(match.end + 1),
+                evidence=SpanEvidence(
+                    oov=1.0,
+                    low_confidence=0.0,
+                    nbest_disagreement=0.0,
+                    boundary_risk=1.0,
+                    mixed_script=(
+                        1.0
+                        if has_suspicious_mixed_scripts(
+                            request.text[match.start : match.end]
+                        )
+                        else 0.0
+                    ),
+                    neighbor_hint=1.0,
+                    risk_score=round(0.25 + 0.15 + 0.10 * match.score, 4),
+                ),
+                retrieval_hint=match.score,
+            )
+            for match in matches
+        ]
+
+    @staticmethod
+    def _asian_languages(request: MatchRequest) -> list[str]:
+        if request.locale:
+            return [request.locale.split("-")[0].split("_")[0].casefold()]
+        scripts = detect_scripts(request.text)
+        mapping = {"Hani": "zh", "Hira": "ja", "Kana": "ja", "Hang": "ko", "Deva": "hi"}
+        return list(dict.fromkeys(mapping[script] for script in scripts if script in mapping))
 
     @staticmethod
     def _token_confidences(request: MatchRequest, tokens: list[TextToken]) -> list[float]:
@@ -137,7 +183,10 @@ class SuspiciousSpanDetector:
         ranked = sorted(
             spans,
             key=lambda span: (
-                neighbor_scores.get((span.token_start, span.token_end), 0),
+                max(
+                    span.retrieval_hint,
+                    neighbor_scores.get((span.token_start, span.token_end), 0),
+                ),
                 span.evidence.risk_score,
                 span.token_end - span.token_start,
             ),

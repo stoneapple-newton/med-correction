@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,16 @@ from rapidfuzz import fuzz, process
 
 from medterm.normalization import normalize_term
 from medterm.pronunciation import PronunciationEngine, ngrams
+
+ASIAN_LANGUAGES = frozenset({"zh", "ja", "ko", "hi"})
+
+
+@dataclass(frozen=True)
+class ApproximateAliasSpan:
+    start: int
+    end: int
+    score: float
+    entry_id: int
 
 
 class SourceTerm(BaseModel):
@@ -167,6 +178,61 @@ class DictionaryIndex:
         )[:limit_per_channel]:
             candidates.setdefault(entry_id, {})["phonetic_block"] = count / max(query_gram_count, 1)
         return candidates
+
+    def find_approximate_asian_spans(
+        self,
+        text: str,
+        languages: list[str],
+        *,
+        score_cutoff: float = 0.72,
+        length_slack: int = 2,
+        limit: int = 40,
+    ) -> list[ApproximateAliasSpan]:
+        """Find near-dictionary substrings without assuming whitespace token boundaries.
+
+        Normalization is applied to each original-text slice, never to the full text, so the
+        returned offsets always address the unmodified source string. Exact aliases are omitted;
+        they are negative controls unless independent ASR evidence says they need review.
+        """
+        requested = set(languages) & ASIAN_LANGUAGES
+        if not requested or not text:
+            return []
+
+        best: dict[tuple[int, int], ApproximateAliasSpan] = {}
+        for alias, entry_id in zip(self.alias_values, self.alias_entry_ids, strict=True):
+            entry = self.artifact.entries[entry_id]
+            if entry.language not in requested or not alias:
+                continue
+            if alias in normalize_term(text, entry.language):
+                continue
+            alignment = fuzz.partial_ratio_alignment(alias, text, score_cutoff=50)
+            if alignment is None:
+                continue
+            min_length = max(1, len(alias) - length_slack)
+            max_length = min(len(text), len(alias) + length_slack)
+            start_floor = max(0, alignment.dest_start - length_slack)
+            start_ceiling = min(len(text), alignment.dest_start + length_slack)
+            for span_length in range(min_length, max_length + 1):
+                for start in range(start_floor, start_ceiling + 1):
+                    end = start + span_length
+                    if end > len(text):
+                        continue
+                    observed = normalize_term(text[start:end], entry.language)
+                    if not observed or observed == alias:
+                        continue
+                    score = fuzz.ratio(observed, alias) / 100
+                    if score < score_cutoff:
+                        continue
+                    key = (start, end)
+                    candidate = ApproximateAliasSpan(start, end, score, entry_id)
+                    previous = best.get(key)
+                    if previous is None or score > previous.score:
+                        best[key] = candidate
+        return sorted(
+            best.values(),
+            key=lambda item: (item.score, item.end - item.start),
+            reverse=True,
+        )[:limit]
 
     def search(self, query: str, limit: int = 10) -> list[tuple[DictionaryEntry, float]]:
         normalized = normalize_term(query)

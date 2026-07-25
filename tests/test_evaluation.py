@@ -42,6 +42,12 @@ def test_evaluation_reports_retrieval_and_workload_metrics(
     assert report["wer"] > 0
     assert report["cer"] > 0
     assert report["auto_commit_count"] == 0
+    assert report["targets"]["sensitivity"] == {
+        "target": 0.95,
+        "observed": 1.0,
+        "met": True,
+    }
+    assert report["targets"]["selectivity"]["observed"] == 1.0
 
 
 def test_versioned_detection_dataset_is_valid_and_reports_slices(

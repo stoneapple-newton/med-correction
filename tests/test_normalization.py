@@ -1,6 +1,7 @@
 from medterm.normalization import (
     detect_scripts,
     extract_medication_fields,
+    has_suspicious_mixed_scripts,
     normalize_text,
     strip_structured_tokens,
     tokenize_with_offsets,
@@ -26,3 +27,5 @@ def test_offsets_reference_original_text() -> None:
 def test_script_detection_preserves_mixed_script_evidence() -> None:
     assert detect_scripts("metformin") == ["Latn"]
     assert detect_scripts("metформин") == ["Cyrl", "Latn"]
+    assert has_suspicious_mixed_scripts("metформин") is True
+    assert has_suspicious_mixed_scripts("薬はメトホルミンです") is False

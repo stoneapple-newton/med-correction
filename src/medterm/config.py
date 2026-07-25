@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     force_review_margin: float = 0.12
     max_span_tokens: int = 5
     default_top_k: int = 5
+    target_sensitivity: float = 0.95
+    target_selectivity: float = 0.95
 
 
 @lru_cache

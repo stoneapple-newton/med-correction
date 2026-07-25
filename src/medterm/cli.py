@@ -56,4 +56,14 @@ def evaluate_command() -> None:
         force_review_margin=settings.force_review_margin,
         max_span_tokens=settings.max_span_tokens,
     )
-    print(json.dumps(evaluate_records(matcher, load_jsonl(args.dataset)), indent=2))
+    print(
+        json.dumps(
+            evaluate_records(
+                matcher,
+                load_jsonl(args.dataset),
+                target_sensitivity=settings.target_sensitivity,
+                target_selectivity=settings.target_selectivity,
+            ),
+            indent=2,
+        )
+    )

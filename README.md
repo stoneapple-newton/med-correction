@@ -1,6 +1,6 @@
 # Term Trace
 
-Term Trace is an English-first, review-first service for finding medical terms that may have
+Term Trace is a review-first service for finding medical terms that may have
 been mistranscribed and matching them to a controlled dictionary. It accepts text or audio plus
 an optional transcript, detects suspicious 1–5 token spans, generates pronunciations, retrieves
 dictionary candidates through spelling and phonetic channels, and returns an auditable ranked
@@ -18,6 +18,9 @@ sample. Production use requires a licensed, validated terminology release and cl
 - Loss-minimizing Unicode normalization and structured extraction of strength, route, and dosage
   form tokens.
 - Script detection and a fastText `lid.176` adapter with an explicit script-based fallback.
+- Offset-preserving approximate substring retrieval for Chinese, Japanese, Korean, and Hindi,
+  including text whose term boundaries are not represented by spaces. Normal Japanese
+  kanji/hiragana/katakana composition is not mislabeled as suspicious mixed-script text.
 - Recall-oriented 1–5 token suspicious-span detection using OOV, ASR confidence, N-best
   disagreement, boundary, mixed-script, and phonetic-neighbor signals.
 - Tiered pronunciation generation: curated IPA, English CMUdict, Epitran for configured languages,
@@ -31,6 +34,9 @@ sample. Production use requires a licensed, validated terminology release and cl
   a Streamlit reviewer console with audio, context, pronunciation evidence, score breakdowns,
   safety warnings, and reviewer actions.
 - Docker Compose for the API and reviewer console.
+- A synthetic-only LangGraph experiment that uses DeepSeek through its OpenAI-compatible API,
+  validates model offsets and controlled-dictionary IDs, rejects invented/unchanged terms, and
+  traces offline evaluations to LangSmith. It is not connected to the clinical API path.
 
 ## Architecture
 
@@ -198,10 +204,17 @@ All settings use the `MEDTERM_` prefix:
 | `SUSPECT_THRESHOLD` | `0.30` |
 | `FORCE_REVIEW_MARGIN` | `0.12` |
 | `MAX_SPAN_TOKENS` | `5` |
+| `TARGET_SENSITIVITY` | `0.95` (evaluation target only) |
+| `TARGET_SELECTIVITY` | `0.95` (evaluation target only) |
 
 Thresholds and score weights are seeds from the plan, not clinically validated constants. Tune
 them only on a held-out, versioned evaluation set and monitor medical-term precision/recall,
 false-correction rate, recall@1/5, MRR, review rate, abstain rate, and dose-adjacent/LASA errors.
+
+Evaluation also reports the requested targets through `targets`: sensitivity is overlap span
+recall, while selectivity is one minus the negative-record false-positive rate. Both default to
+`0.95` via `MEDTERM_TARGET_SENSITIVITY` and `MEDTERM_TARGET_SELECTIVITY`. These are acceptance
+targets, not runtime score thresholds, and reports state explicitly whether each target was met.
 
 ## Verification
 
@@ -269,6 +282,47 @@ produce strong correction results.
 The [dataset manifest](data/evaluation_multilingual_v1.manifest.json) records exact coverage and
 limitations. The [online-resource review](docs/multilingual_dataset_research.md) documents existing
 medical spelling, ASR, and entity corpora and why they are not copied into this repository.
+
+The development terminology now contains matching Chinese, Japanese, Korean, and Hindi entries
+for the ten synthetic benchmark concepts. Their provenance is
+`local-multilingual-development-unreviewed`: they are test coverage, require native-speaker and
+clinical review, and must not be promoted as licensed production terminology.
+
+### LangGraph, DeepSeek, and LangSmith experiment
+
+Install the isolated evaluation dependencies:
+
+```powershell
+uv sync --extra dev --extra phonetics --extra llm-evaluation
+```
+
+The script reads the DeepSeek key from the requested `deep-seek-api` environment variable and the
+LangSmith key from `LANGSMITH_API_KEY`. Defaults are `deepseek-v4-flash` and
+`https://api.deepseek.com`; model output is non-thinking JSON to avoid truncating the structured
+answer. Only synthetic records are eligible for upload:
+
+```powershell
+$env:LANGSMITH_TRACING = "true"
+$env:LANGSMITH_PROJECT = "term-trace-development"
+uv run python scripts/langsmith_evaluate.py upload
+uv run python scripts/langsmith_evaluate.py evaluate --limit 56 --max-concurrency 2
+```
+
+The upload is idempotent and refuses to mutate an existing dataset whose count differs. Use a new
+versioned dataset name for changed data. Pass `--limit 0` to evaluate all 280 Asian examples.
+
+The framework choice is deliberately LangGraph rather than Deep Agents: this workflow needs three
+fixed, auditable steps (prepare controlled catalog, propose, validate), not autonomous planning,
+filesystem access, memory, or subagents. Deep Agents would expand the attack and privacy surface
+without adding a correction-specific capability.
+
+On 2026-07-26, a balanced 56-record LangSmith experiment (49 positive, seven negative synthetic
+cases) completed without errors. The standalone DeepSeek graph scored 0.735 sensitivity,
+0.735 correction@1, 1.000 selectivity, and 1.000 auto-commit safety. The deterministic matcher on
+the identical examples scored 0.714 sensitivity, 0.714 correction@1, and 1.000 selectivity. The
+model improved both sensitivity and correction@1 by 0.020, but it did not meet the joint 0.95
+targets or the bar for production integration. These development results are not
+clinical-performance estimates.
 
 ## Safety boundary
 

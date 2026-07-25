@@ -116,3 +116,11 @@ def detect_scripts(text: str) -> list[str]:
 def primary_script(text: str) -> str:
     scripts = detect_scripts(text)
     return scripts[0] if len(scripts) == 1 else "+".join(scripts)
+
+
+def has_suspicious_mixed_scripts(text: str) -> bool:
+    scripts = set(detect_scripts(text))
+    if len(scripts) <= 1:
+        return False
+    # Japanese normally combines kanji, hiragana, and katakana in one sentence or term.
+    return not scripts.issubset({"Hani", "Hira", "Kana"})

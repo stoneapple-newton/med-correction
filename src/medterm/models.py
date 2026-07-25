@@ -51,6 +51,7 @@ class ScoreBreakdown(BaseModel):
     prior: float
     phonetic_feature: float
     ipa_ngram: float
+    scoring_profile: Literal["phonetic_first", "graphemic_fallback"] = "phonetic_first"
 
 
 class CandidateResult(BaseModel):

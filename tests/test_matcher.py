@@ -72,3 +72,29 @@ def test_carries_asr_offsets_into_audit_output(matcher: MedicalTermMatcher) -> N
     )
     assert response.spans[0].audio_start == 1.0
     assert response.spans[0].audio_end == 1.8
+
+
+def test_detects_chinese_term_without_whitespace_and_preserves_offsets(
+    matcher: MedicalTermMatcher,
+) -> None:
+    text = "用药清单中记录了二甲双胍。"
+    corrupted = text.replace("二甲双胍", "二甲双")
+
+    response = matcher.match(MatchRequest(text=corrupted, locale="zh-CN"))
+
+    span = next(item for item in response.spans if item.candidates[0].term == "二甲双胍")
+    assert span.span_text == "二甲双"
+    assert corrupted[span.char_start : span.char_end] == span.span_text
+    assert span.candidates[0].score_breakdown.scoring_profile == "graphemic_fallback"
+    assert "pronunciation_unavailable" in span.decision_reason
+    assert span.decision == "review"
+
+
+def test_does_not_flag_correct_japanese_term_without_asr_evidence(
+    matcher: MedicalTermMatcher,
+) -> None:
+    response = matcher.match(
+        MatchRequest(text="記録どおりメトホルミンを継続します。", locale="ja-JP")
+    )
+
+    assert response.spans == []
