@@ -1,0 +1,32 @@
+concept_id,term,aliases,language,risk_tier,prior,provenance,pronunciations
+RxCUI:6809,metformin,Glucophage|metformin hydrochloride,en,standard,0.95,RxNorm|RxTerms,mɛtˈfɔɹmɪn
+RxCUI:5640,ibuprofen,Advil|Motrin,en,standard,0.92,RxNorm|RxTerms,ˌaɪbjuˈproʊfən
+RxCUI:161,acetaminophen,Tylenol|paracetamol,en,standard,0.94,RxNorm|RxTerms,əˌsitəˈmɪnəfən
+RxCUI:36567,simvastatin,Zocor,en,standard,0.80,RxNorm|RxTerms,ˌsɪmvəˈstætɪn
+RxCUI:83367,atorvastatin,Lipitor,en,standard,0.91,RxNorm|RxTerms,əˌtɔɹvəˈstætɪn
+RxCUI:29046,lisinopril,Zestril|Prinivil,en,standard,0.90,RxNorm|RxTerms,laɪˈsɪnəprɪl
+RxCUI:32968,omeprazole,Prilosec,en,standard,0.89,RxNorm|RxTerms,oʊˈmɛprəzoʊl
+RxCUI:723,amoxicillin,Amoxil,en,standard,0.91,RxNorm|RxTerms,əˌmɑksɪˈsɪlɪn
+RxCUI:7980,penicillin,penicillin V|penicillin G,en,high,0.82,RxNorm|RxTerms,ˌpɛnɪˈsɪlɪn
+RxCUI:2551,ciprofloxacin,Cipro,en,high,0.72,RxNorm|RxTerms,ˌsɪproʊˈflɑksəsɪn
+RxCUI:11289,warfarin,Coumadin|Jantoven,en,critical,0.88,RxNorm|RxTerms,ˈwɔɹfərɪn
+RxCUI:5224,heparin,unfractionated heparin,en,critical,0.84,RxNorm|RxTerms,ˈhɛpərɪn
+RxCUI:67108,enoxaparin,Lovenox,en,critical,0.79,RxNorm|RxTerms,ɪˌnɑksəˈpærɪn
+RxCUI:1191,aspirin,ASA,en,high,0.94,RxNorm|RxTerms,ˈæspərɪn
+RxCUI:7052,morphine,MS Contin,en,critical,0.70,RxNorm|RxTerms,ˈmɔɹfin
+RxCUI:7804,oxycodone,OxyContin,en,critical,0.77,RxNorm|RxTerms,ˌɑksiˈkoʊdoʊn
+RxCUI:4337,fentanyl,Sublimaze,en,critical,0.74,RxNorm|RxTerms,ˈfɛntənɪl
+RxCUI:8640,prednisone,Deltasone,en,standard,0.78,RxNorm|RxTerms,ˈprɛdnɪsoʊn
+RxCUI:72625,albuterol,salbutamol|Ventolin,en,standard,0.87,RxNorm|RxTerms,ælˈbjutərɔl
+RxCUI:6470,lorazepam,Ativan,en,critical,0.65,RxNorm|RxTerms,lɔˈræzəpæm
+RxCUI:3322,diazepam,Valium,en,critical,0.61,RxNorm|RxTerms,daɪˈæzəpæm
+RxCUI:596,amlodipine,Norvasc,en,standard,0.88,RxNorm|RxTerms,æmˈloʊdəpin
+RxCUI:6918,metoprolol,Lopressor|Toprol XL,en,standard,0.86,RxNorm|RxTerms,mɛˈtoʊprəlɔl
+RxCUI:2599,clonidine,Catapres,en,high,0.58,RxNorm|RxTerms,ˈklɑnɪdin
+RxCUI:2598,clonazepam,Klonopin,en,critical,0.56,RxNorm|RxTerms,kloʊˈnæzəpæm
+LOCAL:cbc,complete blood count,CBC|full blood count,en,standard,0.90,local,C B C
+LOCAL:myocardial-infarction,myocardial infarction,MI|heart attack,en,high,0.83,local,ˌmaɪoʊˈkɑɹdiəl ɪnˈfɑɹkʃən
+LOCAL:hypertension,hypertension,high blood pressure|HTN,en,standard,0.92,local,ˌhaɪpərˈtɛnʃən
+LOCAL:diabetes-mellitus,diabetes mellitus,diabetes|DM,en,standard,0.95,local,ˌdaɪəˈbitiz məˈlaɪtəs
+LOCAL:appendectomy,appendectomy,appendix removal,en,standard,0.60,local,ˌæpənˈdɛktəmi
+

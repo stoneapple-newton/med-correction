@@ -1,0 +1,33 @@
+services:
+  api:
+    build: .
+    command: ["medterm-api", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      MEDTERM_ARTIFACT_PATH: /app/data/artifacts/dictionary.json
+      MEDTERM_AUDIT_DB_PATH: /app/data/audit/medterm.sqlite3
+      MEDTERM_AUDIO_DIR: /app/data/audio
+    volumes:
+      - medterm-audit:/app/data/audit
+      - medterm-audio:/app/data/audio
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  reviewer:
+    build: .
+    command: ["streamlit", "run", "reviewer_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    environment:
+      MEDTERM_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8501:8501"
+
+volumes:
+  medterm-audit:
+  medterm-audio:
