@@ -1,0 +1,120 @@
+{
+  "conditions": {
+    "character_deletion": 110,
+    "character_substitution": 110,
+    "character_transposition": 110,
+    "correct_term_control": 110,
+    "low_confidence": 110,
+    "script_confusion": 110,
+    "word_boundary": 110
+  },
+  "contains_real_patient_data": false,
+  "contains_third_party_dataset_rows": false,
+  "dataset_version": "term-trace-multilingual-correction-v1",
+  "description": "Synthetic multilingual medical-term detection and correction benchmark",
+  "generated_by": "scripts/build_multilingual_evaluation.py",
+  "language_count": 11,
+  "languages": [
+    {
+      "locale": "en-US",
+      "region": "global",
+      "review_status": "requires_native_speaker_and_clinical_review",
+      "script": "Latn",
+      "term_count": 10
+    },
+    {
+      "locale": "es-ES",
+      "region": "europe",
+      "review_status": "requires_native_speaker_and_clinical_review",
+      "script": "Latn",
+      "term_count": 10
+    },
+    {
+      "locale": "fr-FR",
+      "region": "europe",
+      "review_status": "requires_native_speaker_and_clinical_review",
+      "script": "Latn",
+      "term_count": 10
+    },
+    {
+      "locale": "de-DE",
+      "region": "europe",
+      "review_status": "requires_native_speaker_and_clinical_review",
+      "script": "Latn",
+      "term_count": 10
+    },
+    {
+      "locale": "it-IT",
+      "region": "europe",
+      "review_status": "requires_native_speaker_and_clinical_review",
+      "script": "Latn",
+      "term_count": 10
+    },
+    {
+      "locale": "pt-PT",
+      "region": "europe",
+      "review_status": "requires_native_speaker_and_clinical_review",
+      "script": "Latn",
+      "term_count": 10
+    },
+    {
+      "locale": "ru-RU",
+      "region": "europe",
+      "review_status": "requires_native_speaker_and_clinical_review",
+      "script": "Cyrl",
+      "term_count": 10
+    },
+    {
+      "locale": "zh-CN",
+      "region": "asia",
+      "review_status": "requires_native_speaker_and_clinical_review",
+      "script": "Hans",
+      "term_count": 10
+    },
+    {
+      "locale": "ja-JP",
+      "region": "asia",
+      "review_status": "requires_native_speaker_and_clinical_review",
+      "script": "Jpan",
+      "term_count": 10
+    },
+    {
+      "locale": "ko-KR",
+      "region": "asia",
+      "review_status": "requires_native_speaker_and_clinical_review",
+      "script": "Kore",
+      "term_count": 10
+    },
+    {
+      "locale": "hi-IN",
+      "region": "asia",
+      "review_status": "requires_native_speaker_and_clinical_review",
+      "script": "Deva",
+      "term_count": 10
+    }
+  ],
+  "limitations": [
+    "Term translations and templates require native-speaker and clinical review.",
+    "Character mutations model controlled stress cases, not observed prevalence.",
+    "The corpus must not be used to claim clinical performance.",
+    "Synthetic concept IDs are not terminology-authority identifiers."
+  ],
+  "negative_record_count": 110,
+  "positive_record_count": 660,
+  "record_count": 770,
+  "records_per_language": {
+    "de": 70,
+    "en": 70,
+    "es": 70,
+    "fr": 70,
+    "hi": 70,
+    "it": 70,
+    "ja": 70,
+    "ko": 70,
+    "pt": 70,
+    "ru": 70,
+    "zh": 70
+  },
+  "redistribution_notice": "Project-generated synthetic records. The repository owner must declare a dataset license before external redistribution.",
+  "source_kind": "synthetic"
+}

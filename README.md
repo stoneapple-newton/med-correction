@@ -214,17 +214,61 @@ Tests cover artifact builds, normalization, original offsets, script evidence, A
 confusions, N-best/metadata handling, abstention safety, API/audio contracts, and audit/review
 round trips. Browser verification of the Streamlit workflow is kept as a separate end-to-end gate.
 
-Run the bundled smoke evaluation (the JSONL schema includes gold offsets, concept ID,
-language/script, code-switch, dose adjacency, and risk tier):
+Run the versioned synthetic detection evaluation:
 
 ```powershell
-uv run medterm-evaluate data/evaluation_sample.jsonl
+uv run medterm-evaluate data/evaluation_detection_v1.jsonl
 ```
 
-It reports span-detection recall, recall@1/5, MRR, false-positive rate, review rate, abstain rate,
-auto-commit count, and JiWER WER/CER when reference/ASR transcript pairs are present. Replace the
-sample with the held-out interview, term-card, code-switch, and negative-control sets described in
-the project plan before interpreting the numbers.
+The dataset contains only synthetic examples. Its gold spans mark suspicious source text that a
+reviewer should inspect; correctly transcribed medical terms are negative controls because the
+detector is not intended to flag every medical mention. Cases are tagged for slice reporting,
+including `asr_boundary`, `spelling`, `dose_adjacent`, `high_risk`, `mixed_script`,
+`low_confidence`, `unicode`, `multi_span`, and `negative`.
+
+Each JSONL record has a stable `case_id`, `dataset_version`, original `text`, optional `locale`,
+`tokens`, `n_best`, `reference_transcript`, and `asr_hypothesis`, plus `tags` and `gold_spans`.
+Every gold span uses Python-style half-open character offsets (`char_start` inclusive,
+`char_end` exclusive), a matching `span_text`, and optionally `gold_term` and `concept_id` for
+candidate-ranking evaluation. Loading fails on duplicate case IDs, invalid ranges, or a
+`span_text` that does not exactly equal the original-text slice.
+
+The report separates exact-boundary from overlap precision/recall/F1, uses one-to-one span
+matching, and includes false positives, false negatives, boundary mismatches, per-tag slices,
+negative-record false-positive rate, recall@1/5, MRR, review/abstain rates, and the observed
+auto-commit count. JiWER WER/CER are added when transcript pairs are present. The older
+`data/evaluation_sample.jsonl` remains a small ASR smoke fixture.
+
+Do not interpret results on this development dataset as clinical performance or tune thresholds
+against it. Before making performance claims, create a separately versioned, held-out,
+license-reviewed and clinically reviewed set with representative negative controls, accents,
+code-switching, terminology releases, and ASR conditions.
+
+### Multilingual correction benchmark
+
+`data/evaluation_multilingual_v1.jsonl` contains 770 synthetic records: 70 each for English,
+Spanish, French, German, Italian, Portuguese, Russian, Mandarin Chinese, Japanese, Korean, and
+Hindi. For each language, ten medical terms are exercised under character deletion,
+transposition, boundary insertion, substitution, low ASR confidence, script confusion, and a
+correct-term negative control. It includes no real patient data or copied third-party dataset rows.
+
+Regenerate or verify the committed dataset and manifest deterministically:
+
+```powershell
+uv run python scripts/build_multilingual_evaluation.py
+uv run python scripts/build_multilingual_evaluation.py --check
+uv run medterm-evaluate data/evaluation_multilingual_v1.jsonl
+```
+
+The evaluator reports canonical correction accuracy@1, recall@5, and MRR in addition to concept-ID
+ranking and detection metrics. `correction_slices` provides the same correction measures by
+language, region, category, and error condition. The current bundled terminology is English-only,
+so multilingual candidate scores are expected to expose missing terminology coverage rather than
+produce strong correction results.
+
+The [dataset manifest](data/evaluation_multilingual_v1.manifest.json) records exact coverage and
+limitations. The [online-resource review](docs/multilingual_dataset_research.md) documents existing
+medical spelling, ASR, and entity corpora and why they are not copied into this repository.
 
 ## Safety boundary
 
