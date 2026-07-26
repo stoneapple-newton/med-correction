@@ -38,10 +38,28 @@ def test_evaluation_reports_retrieval_and_workload_metrics(
     assert report["recall_at_1"] == 1.0
     assert report["mrr"] == 1.0
     assert report["correction"]["accuracy_at_1"] == 1.0
+    assert report["coverage"] == {
+        "gold": 1,
+        "terminology_coverage": 1.0,
+        "candidate_coverage_at_5": 1.0,
+        "surface_candidate_coverage_at_5": 1.0,
+        "oracle_rerank_accuracy_at_1": 1.0,
+    }
+    assert report["concept_identity"]["status"] == "applicable"
     assert report["review_rate"] == 1.0
     assert report["wer"] > 0
     assert report["cer"] > 0
     assert report["auto_commit_count"] == 0
+    assert report["evaluation_scope"] == {
+        "retrieval_backend": "medterm.terminology.DictionaryIndex",
+        "context_rag_connected": False,
+        "result_classification": "dictionary_baseline",
+        "rag_uplift_measurable": False,
+        "next_required_step": (
+            "connect the evaluator to the versioned RAG retrieval backend and rerun the same "
+            "dataset before reporting uplift"
+        ),
+    }
     assert report["targets"]["sensitivity"] == {
         "target": 0.95,
         "observed": 1.0,
@@ -141,10 +159,19 @@ def test_multilingual_dataset_has_balanced_language_and_condition_coverage() -> 
         "correct_term_control": 110,
     }
     assert manifest["record_count"] == len(records)
+    assert manifest["evaluation_contract_version"] == 2
     assert manifest["contains_real_patient_data"] is False
     assert manifest["contains_third_party_dataset_rows"] is False
     assert all(
         record.text[span.char_start : span.char_end] == span.span_text
+        for record in records
+        for span in record.gold_spans
+    )
+    assert all(
+        span.benchmark_key
+        and span.canonical_term
+        and span.source_vocabulary
+        and span.authority_concept_id
         for record in records
         for span in record.gold_spans
     )
@@ -162,3 +189,87 @@ def test_multilingual_dataset_has_balanced_language_and_condition_coverage() -> 
         capture_output=True,
         text=True,
     )
+
+
+def test_incompatible_benchmark_id_namespace_is_explicitly_not_applicable(
+    matcher: MedicalTermMatcher,
+) -> None:
+    report = evaluate_records(
+        matcher,
+        [
+            {
+                "case_id": "synthetic-id",
+                "text": "met for men",
+                "locale": "en-US",
+                "gold_spans": [
+                    {
+                        "char_start": 0,
+                        "char_end": 11,
+                        "canonical_term": "metformin",
+                        "authority_concept_id": "SYNTH:en:metformin",
+                    }
+                ],
+            }
+        ],
+    )
+
+    assert report["concept_identity"] == {
+        "status": "not_applicable",
+        "reason": "no gold authority IDs share a dictionary namespace",
+        "gold": 0,
+        "excluded_gold_spans": 1,
+        "accuracy_at_1": None,
+        "recall_at_5": None,
+        "mrr": None,
+    }
+    assert report["recall_at_1"] is None
+
+
+def test_concept_identity_uses_original_candidate_rank() -> None:
+    candidates = [
+        SimpleNamespace(concept_id="LOCAL:other", term="other", language="en"),
+        SimpleNamespace(concept_id="RxCUI:6809", term="metformin", language="en"),
+    ]
+    prediction = SimpleNamespace(
+        char_start=0,
+        char_end=11,
+        span_text="met for men",
+        candidates=candidates,
+        decision="review",
+    )
+    entry = SimpleNamespace(
+        concept_id="RxCUI:6809",
+        language="en",
+        normalized_aliases=["metformin"],
+        source_vocabulary="RxNorm",
+        source_release="test",
+        licensing_status="test-only",
+        review_status="reviewed",
+    )
+    matcher = SimpleNamespace(
+        index=SimpleNamespace(artifact=SimpleNamespace(entries=[entry])),
+        match=lambda request: SimpleNamespace(spans=[prediction]),
+    )
+
+    report = evaluate_records(
+        matcher,
+        [
+            {
+                "case_id": "rank-two",
+                "text": "met for men",
+                "locale": "en-US",
+                "gold_spans": [
+                    {
+                        "char_start": 0,
+                        "char_end": 11,
+                        "canonical_term": "metformin",
+                        "authority_concept_id": "RxCUI:6809",
+                    }
+                ],
+            }
+        ],
+    )
+
+    assert report["concept_identity"]["accuracy_at_1"] == 0.0
+    assert report["concept_identity"]["recall_at_5"] == 1.0
+    assert report["concept_identity"]["mrr"] == 0.5

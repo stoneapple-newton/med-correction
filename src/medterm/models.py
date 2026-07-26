@@ -51,6 +51,7 @@ class ScoreBreakdown(BaseModel):
     prior: float
     phonetic_feature: float
     ipa_ngram: float
+    mutation: float = 0.0
     scoring_profile: Literal["phonetic_first", "graphemic_fallback"] = "phonetic_first"
 
 
@@ -63,6 +64,11 @@ class CandidateResult(BaseModel):
     score: float
     score_breakdown: ScoreBreakdown
     provenance: str
+    source_vocabulary: str = "unspecified"
+    source_release: str = "unspecified"
+    licensing_status: str = "unverified"
+    review_status: str = "unreviewed"
+    retrieval_channels: list[str] = Field(default_factory=list)
 
 
 class SpanEvidence(BaseModel):

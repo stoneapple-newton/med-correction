@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,6 +20,13 @@ class GoldSpan(BaseModel):
     char_start: int = Field(ge=0)
     char_end: int = Field(gt=0)
     span_text: str | None = None
+    benchmark_key: str | None = None
+    canonical_term: str | None = None
+    source_vocabulary: str | None = None
+    source_release: str | None = None
+    authority_concept_id: str | None = None
+    # Legacy fields remain readable for existing fixtures. New datasets should use the
+    # explicit canonical/authority fields above so benchmark keys cannot be scored as IDs.
     gold_term: str | None = None
     concept_id: str | None = None
     language: str | None = None
@@ -35,6 +42,14 @@ class GoldSpan(BaseModel):
         if self.char_end <= self.char_start:
             raise ValueError("char_end must be greater than char_start")
         return self
+
+    @property
+    def correction_term(self) -> str | None:
+        return self.canonical_term or self.gold_term
+
+    @property
+    def identity_concept_id(self) -> str | None:
+        return self.authority_concept_id or self.concept_id
 
 
 class EvaluationRecord(BaseModel):
@@ -111,6 +126,30 @@ class CorrectionCounts:
 
 
 @dataclass
+class CoverageCounts:
+    gold: int = 0
+    terminology_hits: int = 0
+    surface_candidate_hits: int = 0
+    language_matched_candidate_hits: int = 0
+    top_1_hits_when_covered: int = 0
+
+    def report(self) -> dict[str, float | int]:
+        return {
+            "gold": self.gold,
+            "terminology_coverage": _ratio(self.terminology_hits, self.gold),
+            "candidate_coverage_at_5": _ratio(
+                self.language_matched_candidate_hits, self.gold
+            ),
+            "surface_candidate_coverage_at_5": _ratio(
+                self.surface_candidate_hits, self.gold
+            ),
+            "oracle_rerank_accuracy_at_1": _ratio(
+                self.top_1_hits_when_covered, self.language_matched_candidate_hits
+            ),
+        }
+
+
+@dataclass
 class EvaluationMetrics:
     records: int = 0
     detection: DetectionCounts = field(default_factory=DetectionCounts)
@@ -125,20 +164,31 @@ class EvaluationMetrics:
     review_spans: int = 0
     abstain_spans: int = 0
     auto_commit_count: int = 0
+    concept_id_excluded_spans: int = 0
 
     def report(self) -> dict[str, Any]:
         detection = self.detection.report()
         predicted = self.detection.predicted
         ranked = self.gold_concept_spans
+        concept_metrics: dict[str, Any] = {
+            "status": "applicable" if ranked else "not_applicable",
+            "reason": None if ranked else "no gold authority IDs share a dictionary namespace",
+            "gold": ranked,
+            "excluded_gold_spans": self.concept_id_excluded_spans,
+            "accuracy_at_1": _ratio(self.recall_at_1_hits, ranked) if ranked else None,
+            "recall_at_5": _ratio(self.recall_at_5_hits, ranked) if ranked else None,
+            "mrr": round(self.reciprocal_rank_sum / ranked, 4) if ranked else None,
+        }
         report: dict[str, Any] = {
             "records": self.records,
             "gold_spans": self.detection.gold,
             "predicted_spans": predicted,
             # Compatibility aliases retained for existing report consumers.
             "span_detection_recall": detection["overlap_recall"],
-            "recall_at_1": _ratio(self.recall_at_1_hits, ranked),
-            "recall_at_5": _ratio(self.recall_at_5_hits, ranked),
-            "mrr": round(self.reciprocal_rank_sum / ranked, 4) if ranked else 0.0,
+            "recall_at_1": concept_metrics["accuracy_at_1"],
+            "recall_at_5": concept_metrics["recall_at_5"],
+            "mrr": concept_metrics["mrr"],
+            "concept_identity": concept_metrics,
             "false_positive_rate": _ratio(
                 int(detection["overlap_false_positives"]), predicted
             ),
@@ -160,6 +210,12 @@ class EvaluationMetrics:
 
 def _ratio(numerator: int, denominator: int) -> float:
     return round(numerator / denominator, 4) if denominator else 0.0
+
+
+def _namespace(concept_id: str | None) -> str | None:
+    if not concept_id or ":" not in concept_id:
+        return None
+    return concept_id.split(":", 1)[0].casefold()
 
 
 def _f1(true_positives: int, predicted: int, gold: int) -> float:
@@ -280,9 +336,23 @@ def evaluate_records(
     hypotheses: list[str] = []
     slice_counts: dict[str, DetectionCounts] = defaultdict(DetectionCounts)
     slice_correction_counts: dict[str, CorrectionCounts] = defaultdict(CorrectionCounts)
+    coverage = CoverageCounts()
+    slice_coverage_counts: dict[str, CoverageCounts] = defaultdict(CoverageCounts)
     case_errors: list[dict[str, Any]] = []
+    error_classification_counts: Counter[str] = Counter()
+    artifact = getattr(getattr(matcher, "index", None), "artifact", None)
+    dictionary_entries = getattr(artifact, "entries", [])
+    dictionary_namespaces = {
+        namespace
+        for entry in dictionary_entries
+        if (namespace := _namespace(entry.concept_id)) is not None
+    }
+    dictionary_terms_by_language: dict[str, set[str]] = defaultdict(set)
+    for entry in dictionary_entries:
+        dictionary_terms_by_language[entry.language].update(entry.normalized_aliases)
 
     for record in validated:
+        slice_keys = set(record.tags) | {f"split:{record.split}"}
         if record.reference_transcript is not None and record.asr_hypothesis is not None:
             references.append(record.reference_transcript)
             hypotheses.append(record.asr_hypothesis)
@@ -305,8 +375,24 @@ def evaluate_records(
         metrics.detection.predicted += len(predictions)
         metrics.detection.exact_tp += exact_count
         metrics.detection.overlap_tp += len(matches)
-        metrics.gold_concept_spans += sum(span.concept_id is not None for span in gold_spans)
-        metrics.correction.gold += sum(span.gold_term is not None for span in gold_spans)
+        for gold in gold_spans:
+            gold_namespace = _namespace(gold.identity_concept_id)
+            if gold_namespace is not None and gold_namespace in dictionary_namespaces:
+                metrics.gold_concept_spans += 1
+            elif gold.identity_concept_id is not None:
+                metrics.concept_id_excluded_spans += 1
+            if gold.correction_term is None:
+                continue
+            metrics.correction.gold += 1
+            coverage.gold += 1
+            language = (gold.language or record.locale or "en").split("-")[0]
+            normalized_gold = normalize_term(gold.correction_term, language)
+            terminology_hit = normalized_gold in dictionary_terms_by_language.get(language, set())
+            coverage.terminology_hits += terminology_hit
+            for tag in slice_keys:
+                slice_coverage = slice_coverage_counts[tag]
+                slice_coverage.gold += 1
+                slice_coverage.terminology_hits += terminology_hit
         metrics.review_spans += sum(span.decision == "review" for span in predictions)
         metrics.abstain_spans += sum(span.decision == "abstain" for span in predictions)
         metrics.auto_commit_count += sum(span.decision == "commit" for span in predictions)
@@ -319,43 +405,62 @@ def evaluate_records(
         for prediction_index, gold_index in matches:
             gold = gold_spans[gold_index]
             prediction = predictions[prediction_index]
-            if gold.gold_term is not None:
+            if gold.correction_term is not None:
                 language = gold.language or record.locale or "en"
                 language = language.split("-")[0]
-                gold_term = normalize_term(gold.gold_term, language)
+                gold_term = normalize_term(gold.correction_term, language)
                 candidate_terms = [
                     normalize_term(candidate.term, language)
                     for candidate in prediction.candidates
                 ]
                 if gold_term in candidate_terms:
                     rank = candidate_terms.index(gold_term) + 1
+                    coverage.surface_candidate_hits += 1
                     metrics.correction.reciprocal_rank_sum += 1 / rank
                     metrics.correction.top_5_hits += 1
                     metrics.correction.top_1_hits += rank == 1
-                    for tag in set(record.tags):
+                    for tag in slice_keys:
                         correction = slice_correction_counts[tag]
                         correction.reciprocal_rank_sum += 1 / rank
                         correction.top_5_hits += 1
                         correction.top_1_hits += rank == 1
-            if gold.concept_id is None:
+                        slice_coverage = slice_coverage_counts[tag]
+                        slice_coverage.surface_candidate_hits += 1
+                language_matched_ranks = [
+                    index + 1
+                    for index, candidate in enumerate(prediction.candidates)
+                    if candidate.language == language
+                    and normalize_term(candidate.term, language) == gold_term
+                ]
+                if language_matched_ranks:
+                    language_rank = language_matched_ranks[0]
+                    coverage.language_matched_candidate_hits += 1
+                    coverage.top_1_hits_when_covered += language_rank == 1
+                    for tag in slice_keys:
+                        slice_coverage = slice_coverage_counts[tag]
+                        slice_coverage.language_matched_candidate_hits += 1
+                        slice_coverage.top_1_hits_when_covered += language_rank == 1
+            gold_concept_id = gold.identity_concept_id
+            gold_namespace = _namespace(gold_concept_id)
+            if gold_namespace is None or gold_namespace not in dictionary_namespaces:
                 continue
             candidate_ids = [
                 candidate.concept_id for candidate in predictions[prediction_index].candidates
             ]
-            if gold.concept_id in candidate_ids:
-                rank = candidate_ids.index(gold.concept_id) + 1
+            if gold_concept_id in candidate_ids:
+                rank = candidate_ids.index(gold_concept_id) + 1
                 metrics.reciprocal_rank_sum += 1 / rank
                 metrics.recall_at_5_hits += 1
                 metrics.recall_at_1_hits += rank == 1
 
-        for tag in set(record.tags):
+        for tag in slice_keys:
             counts = slice_counts[tag]
             counts.gold += len(gold_spans)
             counts.predicted += len(predictions)
             counts.exact_tp += exact_count
             counts.overlap_tp += len(matches)
             slice_correction_counts[tag].gold += sum(
-                span.gold_term is not None for span in gold_spans
+                span.correction_term is not None for span in gold_spans
             )
 
         false_positives = [
@@ -372,7 +477,8 @@ def evaluate_records(
                 "char_start": gold.char_start,
                 "char_end": gold.char_end,
                 "span_text": gold.span_text or record.text[gold.char_start : gold.char_end],
-                "concept_id": gold.concept_id,
+                "benchmark_key": gold.benchmark_key,
+                "authority_concept_id": gold.identity_concept_id,
             }
             for gold_index, gold in enumerate(gold_spans)
             if gold_index not in matched_gold_indices
@@ -400,10 +506,39 @@ def evaluate_records(
             )
             != (gold_spans[gold_index].char_start, gold_spans[gold_index].char_end)
         ]
-        if false_positives or false_negatives or boundary_mismatches:
+        classifications: set[str] = set()
+        if false_positives:
+            classifications.add("false_positive")
+        if false_negatives:
+            classifications.add("detector_miss")
+        if boundary_mismatches:
+            classifications.add("boundary_error")
+        for prediction_index, gold_index in matches:
+            gold = gold_spans[gold_index]
+            if gold.correction_term is None:
+                continue
+            language = (gold.language or record.locale or "en").split("-")[0]
+            normalized_gold = normalize_term(gold.correction_term, language)
+            candidate_terms = [
+                normalize_term(candidate.term, language)
+                for candidate in predictions[prediction_index].candidates
+            ]
+            if normalized_gold not in dictionary_terms_by_language.get(language, set()):
+                classifications.add("terminology_absence")
+            elif normalized_gold not in candidate_terms:
+                classifications.add("candidate_absence")
+            else:
+                rank = candidate_terms.index(normalized_gold) + 1
+                if rank > 1:
+                    classifications.add("ranking_error")
+                if predictions[prediction_index].decision == "abstain":
+                    classifications.add("policy_abstention")
+        error_classification_counts.update(classifications)
+        if false_positives or false_negatives or boundary_mismatches or classifications:
             case_errors.append(
                 {
                     "case_id": record.case_id,
+                    "classifications": sorted(classifications),
                     "false_positives": false_positives,
                     "false_negatives": false_negatives,
                     "boundary_mismatches": boundary_mismatches,
@@ -419,6 +554,33 @@ def evaluate_records(
     report["correction_slices"] = {
         tag: counts.report() for tag, counts in sorted(slice_correction_counts.items())
     }
+    report["coverage"] = coverage.report()
+    report["coverage_slices"] = {
+        tag: counts.report() for tag, counts in sorted(slice_coverage_counts.items())
+    }
+    report["evaluation_scope"] = {
+        "retrieval_backend": "medterm.terminology.DictionaryIndex",
+        "context_rag_connected": False,
+        "result_classification": "dictionary_baseline",
+        "rag_uplift_measurable": False,
+        "next_required_step": (
+            "connect the evaluator to the versioned RAG retrieval backend and rerun the same "
+            "dataset before reporting uplift"
+        ),
+    }
+    terminology_inventory: dict[str, dict[str, Any]] = {}
+    for language in sorted({entry.language for entry in dictionary_entries}):
+        entries = [entry for entry in dictionary_entries if entry.language == language]
+        terminology_inventory[language] = {
+            "entries": len(entries),
+            "unique_concepts": len({entry.concept_id for entry in entries}),
+            "source_vocabularies": sorted({entry.source_vocabulary for entry in entries}),
+            "source_releases": sorted({entry.source_release for entry in entries}),
+            "licensing_statuses": sorted({entry.licensing_status for entry in entries}),
+            "review_statuses": sorted({entry.review_status for entry in entries}),
+        }
+    report["terminology_inventory"] = terminology_inventory
+    report["error_classification_counts"] = dict(sorted(error_classification_counts.items()))
     report["case_errors"] = case_errors
     sensitivity = float(report["detection"]["overlap_recall"])
     selectivity = round(1.0 - float(report["negative_record_false_positive_rate"]), 4)

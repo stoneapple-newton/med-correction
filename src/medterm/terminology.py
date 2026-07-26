@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 from rapidfuzz import fuzz, process
+from rapidfuzz.distance import Levenshtein
 
 from medterm.normalization import normalize_term
 from medterm.pronunciation import PronunciationEngine, ngrams
@@ -31,9 +32,17 @@ class SourceTerm(BaseModel):
     term: str
     aliases: list[str] = Field(default_factory=list)
     language: str = "en"
-    risk_tier: str = "standard"
+    risk_tier: str = "unclassified"
     prior: float = Field(default=0.5, ge=0, le=1)
     provenance: str = "local"
+    source_vocabulary: str = "unspecified"
+    source_release: str = "unspecified"
+    licensing_status: str = "unverified"
+    review_status: str = "unreviewed"
+    concept_type: str = "medical_term"
+    source_record_type: str = "unspecified"
+    lasa_status: str = "unclassified"
+    provenance_detail: dict[str, Any] = Field(default_factory=dict)
     pronunciations: list[str] = Field(default_factory=list)
 
 
@@ -67,9 +76,16 @@ def load_source_terms(path: Path) -> list[SourceTerm]:
                     term=row["term"],
                     aliases=parse_aliases(row.get("aliases", "")),
                     language=row.get("language") or "en",
-                    risk_tier=row.get("risk_tier") or "standard",
+                    risk_tier=row.get("risk_tier") or "unclassified",
                     prior=float(row.get("prior") or 0.5),
                     provenance=row.get("provenance") or "local",
+                    source_vocabulary=row.get("source_vocabulary") or "unspecified",
+                    source_release=row.get("source_release") or "unspecified",
+                    licensing_status=row.get("licensing_status") or "unverified",
+                    review_status=row.get("review_status") or "unreviewed",
+                    concept_type=row.get("concept_type") or "medical_term",
+                    source_record_type=row.get("source_record_type") or "unspecified",
+                    lasa_status=row.get("lasa_status") or "unclassified",
                     pronunciations=parse_aliases(row.get("pronunciations", "")),
                 )
             )
@@ -146,7 +162,11 @@ class DictionaryIndex:
         return normalized in self.exact
 
     def retrieve(
-        self, normalized: str, pronunciations: list[str], limit_per_channel: int = 20
+        self,
+        normalized: str,
+        pronunciations: list[str],
+        limit_per_channel: int = 20,
+        languages: list[str] | None = None,
     ) -> dict[int, dict[str, Any]]:
         candidates: dict[int, dict[str, Any]] = {}
         for entry_id in self.exact.get(normalized, set()):
@@ -177,6 +197,31 @@ class DictionaryIndex:
             phonetic_counts.items(), key=lambda item: item[1], reverse=True
         )[:limit_per_channel]:
             candidates.setdefault(entry_id, {})["phonetic_block"] = count / max(query_gram_count, 1)
+
+        # A deliberately bounded mutation channel for deletion/substitution-like errors. It is
+        # language-filtered and length-bounded so short/common strings cannot fan out broadly.
+        if len(normalized) >= 4 and languages:
+            mutation_matches: list[tuple[int, float, str]] = []
+            requested_languages = set(languages)
+            for alias, entry_id in zip(self.alias_values, self.alias_entry_ids, strict=True):
+                entry = self.artifact.entries[entry_id]
+                max_distance = 1 if max(len(normalized), len(alias)) <= 7 else 2
+                if (
+                    entry.language not in requested_languages
+                    or abs(len(normalized) - len(alias)) > max_distance
+                ):
+                    continue
+                distance = Levenshtein.distance(normalized, alias, score_cutoff=max_distance)
+                if distance <= max_distance:
+                    score = 1.0 - distance / max(len(normalized), len(alias), 1)
+                    mutation_matches.append((entry_id, score, alias))
+            for entry_id, score, alias in sorted(
+                mutation_matches, key=lambda item: item[1], reverse=True
+            )[:limit_per_channel]:
+                info = candidates.setdefault(entry_id, {})
+                if score > info.get("mutation", 0.0):
+                    info["mutation"] = score
+                    info.setdefault("matched_alias", alias)
         return candidates
 
     def find_approximate_asian_spans(

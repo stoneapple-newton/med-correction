@@ -12,6 +12,7 @@
   "contains_third_party_dataset_rows": false,
   "dataset_version": "term-trace-multilingual-correction-v1",
   "description": "Synthetic multilingual medical-term detection and correction benchmark",
+  "evaluation_contract_version": 2,
   "generated_by": "scripts/build_multilingual_evaluation.py",
   "language_count": 11,
   "languages": [
@@ -97,7 +98,7 @@
     "Term translations and templates require native-speaker and clinical review.",
     "Character mutations model controlled stress cases, not observed prevalence.",
     "The corpus must not be used to claim clinical performance.",
-    "Synthetic concept IDs are not terminology-authority identifiers."
+    "Benchmark keys are synthetic case identities and are stored separately from authority concept IDs used for namespace-valid identity scoring."
   ],
   "negative_record_count": 110,
   "positive_record_count": 660,

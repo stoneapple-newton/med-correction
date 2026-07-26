@@ -19,6 +19,17 @@ def test_detects_asr_like_medication_confusion_and_forces_review(
     assert span.candidates[0].score_breakdown.phonetic > 0
 
 
+def test_candidate_exposes_bounded_mutation_evidence(
+    matcher: MedicalTermMatcher,
+) -> None:
+    response = matcher.match(MatchRequest(text="metformn", locale="en-US", top_k=5))
+
+    candidate = response.spans[0].candidates[0]
+    assert candidate.concept_id == "RxCUI:6809"
+    assert "mutation" in candidate.retrieval_channels
+    assert candidate.score_breakdown.mutation > 0.8
+
+
 def test_does_not_flag_already_correct_term_without_asr_evidence(
     matcher: MedicalTermMatcher,
 ) -> None:

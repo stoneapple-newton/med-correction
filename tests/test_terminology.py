@@ -14,3 +14,16 @@ def test_builds_reproducible_versioned_artifact(tmp_path: Path, source_path: Pat
     assert index.is_exact("metformin")
     assert index.is_exact("glucophage")
     assert not index.is_exact("met for men")
+
+
+def test_bounded_mutation_channel_is_language_filtered(index: DictionaryIndex) -> None:
+    english = index.retrieve("metformn", [], languages=["en"])
+    spanish = index.retrieve("metformn", [], languages=["es"])
+
+    metformin_entry = next(
+        entry_id
+        for entry_id, entry in enumerate(index.artifact.entries)
+        if entry.concept_id == "RxCUI:6809" and entry.language == "en"
+    )
+    assert english[metformin_entry]["mutation"] > 0.8
+    assert "mutation" not in spanish.get(metformin_entry, {})

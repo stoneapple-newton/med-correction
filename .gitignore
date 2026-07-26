@@ -8,11 +8,15 @@ htmlcov/
 dist/
 build/
 *.egg-info/
-data/artifacts/*.json
+data/artifacts/*
+!data/artifacts/.gitkeep
+data/builds/*
+!data/builds/.gitkeep
 data/audit/*.sqlite3
 data/audio/*
 !data/audio/.gitkeep
-!data/artifacts/.gitkeep
+data/logs/*
+!data/logs/.gitkeep
 !data/audit/.gitkeep
 .streamlit/secrets.toml
 artifacts/

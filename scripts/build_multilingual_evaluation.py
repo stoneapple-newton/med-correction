@@ -14,6 +14,19 @@ DATASET_VERSION = "term-trace-multilingual-correction-v1"
 DEFAULT_OUTPUT = Path("data/evaluation_multilingual_v1.jsonl")
 DEFAULT_MANIFEST = Path("data/evaluation_multilingual_v1.manifest.json")
 
+AUTHORITY_CONCEPT_IDS = {
+    "metformin": "RxCUI:6809",
+    "amoxicillin": "RxCUI:723",
+    "ibuprofen": "RxCUI:5640",
+    "acetaminophen": "RxCUI:161",
+    "warfarin": "RxCUI:11289",
+    "insulin": "LOCAL:insulin",
+    "hypertension": "LOCAL:hypertension",
+    "pneumonia": "LOCAL:pneumonia",
+    "diabetes": "LOCAL:diabetes-mellitus",
+    "myocardial-infarction": "LOCAL:myocardial-infarction",
+}
+
 
 @dataclass(frozen=True)
 class Term:
@@ -442,8 +455,12 @@ def _record(
             "char_start": start,
             "char_end": end,
             "span_text": source,
-            "gold_term": term.text,
-            "concept_id": f"SYNTH:{language.code}:{term.key}",
+            "benchmark_key": f"SYNTH:{language.code}:{term.key}",
+            "canonical_term": term.text,
+            "source_vocabulary": (
+                "RxNorm" if AUTHORITY_CONCEPT_IDS[term.key].startswith("RxCUI:") else "local"
+            ),
+            "authority_concept_id": AUTHORITY_CONCEPT_IDS[term.key],
             "language": language.code,
             "script": language.script,
             "code_switch": condition == "script_confusion",
@@ -543,6 +560,7 @@ def build_manifest(records: list[dict[str, Any]]) -> dict[str, Any]:
     positive_count = sum(bool(record["gold_spans"]) for record in records)
     return {
         "dataset_version": DATASET_VERSION,
+        "evaluation_contract_version": 2,
         "description": "Synthetic multilingual medical-term detection and correction benchmark",
         "generated_by": "scripts/build_multilingual_evaluation.py",
         "record_count": len(records),
@@ -572,7 +590,10 @@ def build_manifest(records: list[dict[str, Any]]) -> dict[str, Any]:
             "Term translations and templates require native-speaker and clinical review.",
             "Character mutations model controlled stress cases, not observed prevalence.",
             "The corpus must not be used to claim clinical performance.",
-            "Synthetic concept IDs are not terminology-authority identifiers.",
+            (
+                "Benchmark keys are synthetic case identities and are stored separately from "
+                "authority concept IDs used for namespace-valid identity scoring."
+            ),
         ],
     }
 

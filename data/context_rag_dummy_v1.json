@@ -1,0 +1,36 @@
+{
+  "dataset_version": "context-rag-dummy-v1",
+  "records": [
+    {"concept_id":"RxCUI:6809","term":"metformin","language":"en","context_terms":["glucose","diabetes"],"provenance":"synthetic-language-context-v1"},
+    {"concept_id":"RxCUI:11289","term":"warfarin","language":"en","context_terms":["INR","anticoagulation"],"provenance":"synthetic-language-context-v1"},
+    {"concept_id":"RxCUI:723","term":"amoxicillin","language":"en","context_terms":["antibiotic","infection"],"provenance":"synthetic-language-context-v1"},
+    {"concept_id":"RxCUI:6809","term":"二甲双胍","language":"zh","context_terms":["血糖","糖尿病"],"provenance":"synthetic-language-context-v1"},
+    {"concept_id":"RxCUI:11289","term":"华法林","language":"zh","context_terms":["抗凝","凝血"],"provenance":"synthetic-language-context-v1"},
+    {"concept_id":"RxCUI:723","term":"阿莫西林","language":"zh","context_terms":["抗生素","感染"],"provenance":"synthetic-language-context-v1"},
+    {"concept_id":"RxCUI:6809","term":"メトホルミン","language":"ja","context_terms":["血糖","糖尿病"],"provenance":"synthetic-language-context-v1"},
+    {"concept_id":"RxCUI:11289","term":"ワルファリン","language":"ja","context_terms":["抗凝固","INR"],"provenance":"synthetic-language-context-v1"},
+    {"concept_id":"RxCUI:6809","term":"메트포르민","language":"ko","context_terms":["혈당","당뇨병"],"provenance":"synthetic-language-context-v1"},
+    {"concept_id":"RxCUI:11289","term":"와파린","language":"ko","context_terms":["항응고","INR"],"provenance":"synthetic-language-context-v1"},
+    {"concept_id":"RxCUI:6809","term":"मेटफॉर्मिन","language":"hi","context_terms":["रक्त शर्करा","मधुमेह"],"provenance":"synthetic-language-context-v1"},
+    {"concept_id":"RxCUI:11289","term":"वारफारिन","language":"hi","context_terms":["थक्का","INR"],"provenance":"synthetic-language-context-v1"}
+  ],
+  "cases": [
+    {"case_id":"en-easy-warfarin","language":"en","text":"Review warfarn after the INR result","char_start":7,"char_end":14,"span_text":"warfarn","gold_concept_id":"RxCUI:11289"},
+    {"case_id":"en-context-rescue","language":"en","text":"Start metfrn for glucose and diabetes control","char_start":6,"char_end":12,"span_text":"metfrn","gold_concept_id":"RxCUI:6809"},
+    {"case_id":"en-context-antibiotic","language":"en","text":"Use amoxlin as the antibiotic for infection","char_start":4,"char_end":11,"span_text":"amoxlin","gold_concept_id":"RxCUI:723"},
+    {"case_id":"zh-easy-warfarin","language":"zh","text":"复查凝血后继续华法令抗凝","char_start":7,"char_end":10,"span_text":"华法令","gold_concept_id":"RxCUI:11289"},
+    {"case_id":"zh-context-rescue","language":"zh","text":"二甲胍用于糖尿病和血糖管理","char_start":0,"char_end":3,"span_text":"二甲胍","gold_concept_id":"RxCUI:6809"},
+    {"case_id":"zh-context-antibiotic","language":"zh","text":"阿西林用于感染的抗生素复核","char_start":0,"char_end":3,"span_text":"阿西林","gold_concept_id":"RxCUI:723"},
+    {"case_id":"ja-context-metformin","language":"ja","text":"血糖管理でメトミンを糖尿病文脈で確認","char_start":5,"char_end":9,"span_text":"メトミン","gold_concept_id":"RxCUI:6809"},
+    {"case_id":"ja-context-warfarin","language":"ja","text":"INR後にワルリンを抗凝固薬として確認","char_start":5,"char_end":9,"span_text":"ワルリン","gold_concept_id":"RxCUI:11289"},
+    {"case_id":"ko-context-metformin","language":"ko","text":"혈당 관리를 위해 메트르민 당뇨병 문맥 확인","char_start":10,"char_end":14,"span_text":"메트르민","gold_concept_id":"RxCUI:6809"},
+    {"case_id":"ko-easy-warfarin","language":"ko","text":"INR 후 와파린을 항응고제로 확인","char_start":6,"char_end":9,"span_text":"와파린","gold_concept_id":"RxCUI:11289"},
+    {"case_id":"hi-context-metformin","language":"hi","text":"मधुमेह में मेटमिन और रक्त शर्करा की समीक्षा","char_start":11,"char_end":17,"span_text":"मेटमिन","gold_concept_id":"RxCUI:6809"},
+    {"case_id":"hi-context-warfarin","language":"hi","text":"INR के बाद वारिन और थक्का संदर्भ की समीक्षा","char_start":11,"char_end":16,"span_text":"वारिन","gold_concept_id":"RxCUI:11289"},
+    {"case_id":"en-negative-diabetes","language":"en","text":"Routine diabetes diet review today","char_start":8,"char_end":16,"span_text":"diabetes","negative_control":true},
+    {"case_id":"zh-negative-infection","language":"zh","text":"感染随访记录稳定","char_start":4,"char_end":6,"span_text":"记录","negative_control":true},
+    {"case_id":"ja-negative-glucose","language":"ja","text":"血糖の一般的な記録","char_start":3,"char_end":6,"span_text":"一般的","negative_control":true},
+    {"case_id":"ko-negative-inr","language":"ko","text":"INR 결과 기록","char_start":7,"char_end":9,"span_text":"기록","negative_control":true},
+    {"case_id":"hi-negative-diabetes","language":"hi","text":"मधुमेह की सामान्य समीक्षा","char_start":10,"char_end":17,"span_text":"सामान्य","negative_control":true}
+  ]
+}

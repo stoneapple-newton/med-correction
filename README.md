@@ -200,6 +200,14 @@ All settings use the `MEDTERM_` prefix:
 | `AUDIO_DIR` | `data/audio` |
 | `FASTTEXT_MODEL_PATH` | unset |
 | `WHISPER_MODEL` | unset |
+| `TTS_MODEL_ID` | `hexgrad/Kokoro-82M` |
+| `TTS_VOICE` | `af_heart` |
+| `TTS_LANGUAGE_CODE` | `a` (American English) |
+| `TTS_DEVICE` | `auto` |
+| `TTS_SPEED` | `1.0` |
+| `TTS_OUTPUT_DIR` | `data/audio/tts` |
+| `TTS_MANIFEST_PATH` | `data/artifacts/kokoro_references.jsonl` |
+| `TTS_INDEX_PATH` | `data/artifacts/kokoro_vectors.npz` |
 | `REVIEW_THRESHOLD` | `0.55` |
 | `SUSPECT_THRESHOLD` | `0.30` |
 | `FORCE_REVIEW_MARGIN` | `0.12` |
@@ -271,13 +279,29 @@ Regenerate or verify the committed dataset and manifest deterministically:
 uv run python scripts/build_multilingual_evaluation.py
 uv run python scripts/build_multilingual_evaluation.py --check
 uv run medterm-evaluate data/evaluation_multilingual_v1.jsonl
+uv run medterm-evaluate data/evaluation_multilingual_v1.jsonl `
+  --output data/evaluation_multilingual_v1.report.json
 ```
 
-The evaluator reports canonical correction accuracy@1, recall@5, and MRR in addition to concept-ID
-ranking and detection metrics. `correction_slices` provides the same correction measures by
-language, region, category, and error condition. The current bundled terminology is English-only,
-so multilingual candidate scores are expected to expose missing terminology coverage rather than
-produce strong correction results.
+The evaluator reports canonical correction accuracy@1, recall@5, and MRR separately from
+namespace-valid concept identity. Gold spans keep synthetic `benchmark_key` values separate from
+`authority_concept_id`; incompatible ID namespaces are reported as `not_applicable`, never as zero
+retrieval. `coverage_slices` distinguishes language-matched candidate coverage from coincidental
+cross-language surface matches, while `terminology_inventory` exposes source, release, licensing,
+and review-state coverage. The JSON report also records the dictionary/index versions, dataset
+hash, code commit and dirty-worktree state, optional model availability, and evaluation settings.
+
+The bundled terminology covers English plus Chinese, Japanese, Korean, and Hindi development
+entries, but it has no genuine Spanish, French, German, Italian, Portuguese, or Russian coverage.
+Multilingual scores are therefore expected to expose missing terminology rather than demonstrate
+clinical correction quality. See
+[the implementation status and remaining gates](docs/multilingual_evaluation_gap_implementation.md).
+
+Important: `medterm-evaluate` still uses the versioned `DictionaryIndex` artifact, not a Chroma or
+other context-RAG backend. Its multilingual report remains the dictionary baseline and continues
+to show zero language-matched terminology coverage for the European-language slices. The generated
+report records this under `evaluation_scope`. Connecting a versioned RAG backend to the evaluator
+and rerunning the same dataset is required before measuring or claiming uplift.
 
 The [dataset manifest](data/evaluation_multilingual_v1.manifest.json) records exact coverage and
 limitations. The [online-resource review](docs/multilingual_dataset_research.md) documents existing
@@ -287,6 +311,25 @@ The development terminology now contains matching Chinese, Japanese, Korean, and
 for the ten synthetic benchmark concepts. Their provenance is
 `local-multilingual-development-unreviewed`: they are test coverage, require native-speaker and
 clinical review, and must not be promoted as licensed production terminology.
+
+### Local language-context retrieval experiment
+
+The isolated dummy RAG experiment compares surface-only retrieval with deterministic reranking
+from a small synthetic, language-specific context database. It is not connected to the API and
+does not use Chroma or call an LLM. The retriever preserves the supplied span offsets, filters records by
+language, exposes surface/context scores and provenance, and returns only `review` or `abstain`.
+
+```powershell
+uv run python scripts/run_context_rag_experiment.py
+uv run pytest tests/test_context_rag_experiment.py
+```
+
+The bundled 17-case development check (12 positive, five negative; English, Chinese, Japanese,
+Korean, and Hindi) increased synthetic correction sensitivity@5 and selection accuracy@1 from
+0.4167 to 1.0000 while keeping negative-control selectivity at 1.0000. These deliberately
+constructed cases test whether a context signal *can* help; they do not estimate real-world or
+clinical performance. See [the experiment note](docs/context_rag_experiment.md) for definitions,
+guardrails, results, and the validation work required before any product integration.
 
 ### LangGraph, DeepSeek, and LangSmith experiment
 
@@ -323,6 +366,146 @@ the identical examples scored 0.714 sensitivity, 0.714 correction@1, and 1.000 s
 model improved both sensitivity and correction@1 by 0.020, but it did not meet the joint 0.95
 targets or the bar for production integration. These development results are not
 clinical-performance estimates.
+
+### Kokoro synthetic term audio and sound vectors
+
+Kokoro-82M is an optional local TTS stage for creating development reference pronunciations from
+the controlled terminology. The model and voice weights are downloaded from
+`hexgrad/Kokoro-82M` on first use and remain in the local Hugging Face cache. Install the complete
+TTS-to-vector pipeline with:
+
+```powershell
+uv sync --python 3.12 --extra dev --extra phonetics --extra tts `
+  --extra speech-embeddings --extra vector-index
+```
+
+On Windows, install `espeak-ng` from its official MSI if English out-of-dictionary fallback is
+needed. Curated terminology pronunciations are passed directly to Kokoro when present; otherwise
+Kokoro's grapheme-to-phoneme layer is used. Generate WAV files, an auditable JSONL manifest, and a
+sound-vector index in one command:
+
+```powershell
+uv run medterm-build
+uv run medterm-tts-build --language en --language-code a --voice af_heart
+uv run medterm-audio-search data/artifacts/kokoro_vectors.npz `
+  data/audio/query.wav --language en --concept-type medical_term
+```
+
+For a quick local check, add `--limit 1`. Use `--tts-device cpu` or `--tts-device cuda` to force a
+TTS device, and `--embedding-device` independently for the sound-vector encoder. Existing WAVs
+are reused unless `--overwrite` is supplied. The generated defaults are:
+
+- `data/audio/tts/*.wav` — isolated 24 kHz PCM term pronunciations.
+- `data/artifacts/kokoro_references.jsonl` — relative paths plus TTS, phoneme, and terminology
+  provenance.
+- `data/artifacts/kokoro_vectors.npz` — normalized speech-content vectors and provenance.
+
+The default command is intentionally English-only. Other Kokoro language codes require matching
+voices and, for Japanese or Mandarin, the corresponding Misaki language extras. Korean is not a
+Kokoro-82M v1.0 language and must not be approximated with another language pipeline.
+
+Synthetic speech is not a validated human pronunciation corpus and must not be represented as
+one. These vectors are development references for candidate retrieval and projection experiments;
+they require held-out evaluation on approved human recordings. Retrieval remains `review` or
+`abstain`, and `auto_commit_enabled` remains `false`.
+
+Build every Kokoro-supported language present in the bundled terminology with the PowerShell
+runner:
+
+```powershell
+.\scripts\build_all_tts_vectors.ps1 -SyncDependencies
+```
+
+Use `-Limit 1` for a quick smoke run, `-Overwrite` to regenerate existing WAVs,
+`-TtsDevice cpu|cuda`, and `-EmbeddingDevice cpu|cuda` to override device selection. The runner
+creates separate `en`, `zh`, `ja`, and `hi` audio directories, manifests, and vector indexes.
+The first dependency sync also downloads the approximately 770 MB Japanese UniDic data when it is
+missing. Korean is reported and skipped because Kokoro-82M v1.0 does not support it.
+
+Every run writes a timestamped log under `data/logs`. Select a subset and an explicit log path with:
+
+```powershell
+.\scripts\build_all_tts_vectors.ps1 `
+  -Languages en,zh,ja `
+  -TtsDevice cuda `
+  -EmbeddingDevice cuda `
+  -LogPath data/logs/tts_vectors_en_zh_ja.log
+```
+
+### Acoustic pronunciation-vector prototype (Strategy A)
+
+The optional Strategy A prototype converts isolated query recordings and controlled reference
+pronunciations into fixed-length multilingual speech-content vectors. It defaults to
+`facebook/wav2vec2-xls-r-300m`, 16 kHz mono input, statistics pooling, CUDA when available, and
+exact cosine retrieval. Install the model stack and optional FAISS backend with:
+
+```powershell
+uv sync --python 3.12 --extra dev --extra phonetics --extra speech-embeddings --extra vector-index
+```
+
+On Windows, `uv` resolves Torch from PyTorch's CUDA 13.0 wheel index. This is appropriate for the
+tested RTX 4070 laptop and its NVIDIA 580.97 driver; other environments should select a supported
+backend rather than copying that hardware assumption blindly.
+
+Create a de-identified JSONL reference manifest; audio paths are relative to the manifest:
+
+```json
+{"reference_id":"metformin-en-us-01","audio_path":"audio/metformin-en-us-01.wav","concept_id":"LOCAL:METFORMIN","term":"metformin","language":"en","country":"US","pronunciation_type":"human","speaker_accent":"en-US","source":"validated_recording","concept_type":"medication"}
+```
+
+Build and query the local index:
+
+```powershell
+uv run medterm-audio-index data/reference_pronunciations.jsonl `
+  data/artifacts/pronunciation_vectors.npz
+uv run medterm-audio-search data/artifacts/pronunciation_vectors.npz `
+  data/audio/query.wav --language en --country US --country GB --top-k 20
+```
+
+After assembling a versioned training manifest with at least two recordings for every concept,
+train and apply the experimental supervised-contrastive 256-D projection:
+
+```powershell
+uv run medterm-audio-train data/training_pronunciations.jsonl `
+  data/artifacts/medical-awe-v1.pt --device cuda --epochs 100
+uv run medterm-audio-index data/reference_pronunciations.jsonl `
+  data/artifacts/pronunciation_vectors.npz `
+  --projection data/artifacts/medical-awe-v1.pt
+uv run medterm-audio-search data/artifacts/pronunciation_vectors.npz `
+  data/audio/query.wav --language en --top-k 20 `
+  --projection data/artifacts/medical-awe-v1.pt
+```
+
+`MEDTERM_AUDIO_EMBEDDING_MODEL`, `MEDTERM_AUDIO_EMBEDDING_DEVICE`,
+`MEDTERM_AUDIO_EMBEDDING_POOLING`, `MEDTERM_AUDIO_EMBEDDING_PROJECTION_CHECKPOINT`, and
+`MEDTERM_AUDIO_EMBEDDING_MAX_SECONDS` configure the encoder. Without a validated projection
+checkpoint, the output is explicitly a raw pooled baseline (2048 dimensions for XLS-R statistics
+pooling), not a trained medical AWE. A checkpoint must declare itself trained; untrained or
+incompatible query/index configurations are rejected. The index stores multiple vectors per
+concept, filters metadata before ranking, excludes local audio paths, and reports whether FAISS or
+NumPy performed the exact search.
+
+Audio retrieval produces about 20 review candidates for later phoneme and ASR reranking. It never
+rewrites a transcript or selects a medication automatically: responses remain `review` or
+`abstain`, and `auto_commit_enabled` is always `false`. Reference and query recordings may contain
+sensitive health information and must not be committed.
+
+See [the Strategy A research and implementation notes](docs/strategy-a-speech-content-vectors.md).
+
+A local execution check can be run against three synthetic or otherwise approved isolated-term
+recordings:
+
+```powershell
+uv run python scripts/smoke_test_audio_embeddings.py `
+  data/audio/metformin-reference.wav `
+  data/audio/metformin-query.wav `
+  data/audio/metoprolol.wav --device cuda
+```
+
+The initial 2026-07-26 RTX 4070 smoke test successfully exercised CUDA, 2048-D statistics pooling,
+and FAISS, but the raw untrained baseline ranked the different medical term above the same-term
+reference. That result confirms the pipeline runs and also confirms that contrastive projection
+training and reranking are required; it is not an accuracy result.
 
 ## Safety boundary
 

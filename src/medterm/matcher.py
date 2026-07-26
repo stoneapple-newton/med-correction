@@ -70,7 +70,12 @@ class MedicalTermMatcher:
                 pronunciations = [
                     item.value for item in self.pronunciation.generate(normalized, language)
                 ]
-                retrieved = self.index.retrieve(normalized, pronunciations, limit_per_channel=5)
+                retrieved = self.index.retrieve(
+                    normalized,
+                    pronunciations,
+                    limit_per_channel=5,
+                    languages=[language],
+                )
                 best = 0.0
                 for entry_id, raw in retrieved.items():
                     entry = self.index.artifact.entries[entry_id]
@@ -87,6 +92,11 @@ class MedicalTermMatcher:
         scripts = detect_scripts(span.text)
         script = scripts[0] if len(scripts) == 1 else "+".join(scripts)
         structured = extract_medication_fields(span.text)
+        adjacency_start = max(0, span.start - 24)
+        adjacency_end = min(len(request.text), span.end + 24)
+        adjacent_structured = extract_medication_fields(
+            request.text[adjacency_start:adjacency_end]
+        )
         normalized = strip_structured_tokens(span.text) or normalize_term(span.text, language)
         retrieval_languages = [language]
         if language_confidence < 0.5:
@@ -97,7 +107,11 @@ class MedicalTermMatcher:
         pronunciations = list(
             {(item.value, item.source, item.alphabet): item for item in pronunciations}.values()
         )
-        retrieved = self.index.retrieve(normalized, [item.value for item in pronunciations])
+        retrieved = self.index.retrieve(
+            normalized,
+            [item.value for item in pronunciations],
+            languages=retrieval_languages,
+        )
         candidates = [
             self._score_candidate(
                 normalized,
@@ -115,7 +129,7 @@ class MedicalTermMatcher:
             candidates,
             language,
             scripts,
-            structured.strengths,
+            adjacent_structured.strengths,
             language_confidence,
             bool(pronunciations),
         )
@@ -158,6 +172,7 @@ class MedicalTermMatcher:
         matched_alias = str(raw.get("matched_alias") or entry.normalized_term)
         orthographic = max(
             float(raw.get("orthographic", 0.0)),
+            float(raw.get("mutation", 0.0)),
             max(
                 (ratio(normalized, alias) / 100 for alias in entry.normalized_aliases), default=0.0
             ),
@@ -201,6 +216,7 @@ class MedicalTermMatcher:
             prior=entry.prior,
             phonetic_feature=round(feature, 4),
             ipa_ngram=round(trigram, 4),
+            mutation=round(float(raw.get("mutation", 0.0)), 4),
             scoring_profile=scoring_profile,
         )
         return CandidateResult(
@@ -212,6 +228,15 @@ class MedicalTermMatcher:
             score=round(score, 4),
             score_breakdown=breakdown,
             provenance=entry.provenance,
+            source_vocabulary=entry.source_vocabulary,
+            source_release=entry.source_release,
+            licensing_status=entry.licensing_status,
+            review_status=entry.review_status,
+            retrieval_channels=sorted(
+                key
+                for key in ("exact", "orthographic", "mutation", "phonetic_block")
+                if key in raw
+            ),
         )
 
     def _best_phonetic(
@@ -256,6 +281,8 @@ class MedicalTermMatcher:
             reasons.append("low_margin")
         if candidates[0].risk_tier.casefold() in {"high", "lasa", "critical"}:
             reasons.append("high_risk_medication")
+        if candidates[0].review_status.casefold() != "reviewed":
+            reasons.append("terminology_unreviewed")
         if len(scripts) > 1 and not set(scripts).issubset({"Hani", "Hira", "Kana"}):
             reasons.append("mixed_script")
         if language_confidence < 0.5:
