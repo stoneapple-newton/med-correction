@@ -4,7 +4,19 @@ import json
 from pathlib import Path
 
 from medterm.terminology import DictionaryArtifact, DictionaryEntry
-from medterm.tts import SynthesisResult, build_synthetic_references, write_reference_manifest
+from medterm.tts import (
+    KokoroSynthesizer,
+    SynthesisResult,
+    build_synthetic_references,
+    synthetic_reference_identity,
+    write_reference_manifest,
+)
+
+
+def test_kokoro_synthesizer_retains_lazy_pipeline_loader() -> None:
+    synthesizer = KokoroSynthesizer()
+
+    assert callable(synthesizer._load_pipeline)
 
 
 class FakeSynthesizer:
@@ -38,6 +50,7 @@ def _artifact() -> DictionaryArtifact:
                 concept_id="LOCAL:METFORMIN",
                 term="metformin",
                 language="en",
+                concept_type="medication",
                 pronunciations=["mɛtˈfɔɹmɪn"],
                 normalized_term="metformin",
                 normalized_aliases=["metformin"],
@@ -69,6 +82,7 @@ def test_build_synthetic_references_preserves_tts_and_terminology_provenance(
     assert reference.synthetic is True
     assert reference.tts_phonemes == "mɛtˈfɔɹmɪn"
     assert reference.tts_model_id == "hexgrad/Kokoro-82M"
+    assert reference.concept_type == "medication"
     assert reference.terminology_version == "dict-test-v1"
     assert reference.terminology_source_sha256 == "a" * 64
 
@@ -119,3 +133,26 @@ def test_mismatched_kokoro_language_code_is_rejected(tmp_path: Path) -> None:
         assert "does not match" in str(exc)
     else:
         raise AssertionError("A mismatched language/voice pipeline should be rejected")
+
+
+def test_content_identity_excludes_device_and_local_path() -> None:
+    arguments = {
+        "concept_id": "RxNorm:6809",
+        "term": "metformin",
+        "language": "en",
+        "curated_phonemes": "mɛtˈfɔɹmɪn",
+        "terminology_release": "rxnorm-202607",
+        "tts_model_revision": "kokoro-rev",
+        "g2p_revision": "misaki-rev",
+        "voice": "af_heart",
+        "speed": 1.0,
+        "sample_rate": 24_000,
+    }
+    first, inputs = synthetic_reference_identity(**arguments)
+    second, _ = synthetic_reference_identity(**arguments)
+
+    assert first == second
+    assert len(first) == 64
+    assert "device" not in inputs
+    assert "path" not in inputs
+    assert inputs["identity_schema_version"] == 1

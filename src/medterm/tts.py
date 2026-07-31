@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -12,6 +11,7 @@ from typing import Any, Protocol
 import numpy as np
 
 from medterm.audio_embeddings import ReferencePronunciation
+from medterm.bulk import canonical_hash, sha256_file
 from medterm.terminology import DictionaryArtifact
 
 KOKORO_LANGUAGE_CODES: dict[str, frozenset[str]] = {
@@ -126,13 +126,9 @@ class KokoroSynthesizer:
             raise TTSGenerationError(f"Kokoro produced invalid audio for term: {text!r}")
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = output_path.with_name(
-            f".{output_path.stem}.{uuid.uuid4().hex}.tmp.wav"
-        )
+        temporary = output_path.with_name(f".{output_path.stem}.{uuid.uuid4().hex}.tmp.wav")
         try:
-            self._soundfile.write(
-                temporary, waveform, self.config.sample_rate, subtype="PCM_16"
-            )
+            self._soundfile.write(temporary, waveform, self.config.sample_rate, subtype="PCM_16")
             temporary.replace(output_path)
         finally:
             temporary.unlink(missing_ok=True)
@@ -166,6 +162,36 @@ class KokoroSynthesizer:
         self._soundfile = sf
 
 
+def synthetic_reference_identity(
+    *,
+    concept_id: str,
+    term: str,
+    language: str,
+    curated_phonemes: str | None,
+    terminology_release: str,
+    tts_model_revision: str,
+    g2p_revision: str,
+    voice: str,
+    speed: float,
+    sample_rate: int,
+) -> tuple[str, dict[str, Any]]:
+    """Return the logical identity; execution device and local paths are intentionally absent."""
+    inputs = {
+        "identity_schema_version": 1,
+        "concept_id": concept_id,
+        "term": term,
+        "language": language,
+        "curated_phonemes": curated_phonemes,
+        "terminology_release": terminology_release,
+        "tts_model_revision": tts_model_revision,
+        "g2p_revision": g2p_revision,
+        "voice": voice,
+        "speed": speed,
+        "sample_rate": sample_rate,
+    }
+    return canonical_hash(inputs), inputs
+
+
 def build_synthetic_references(
     artifact: DictionaryArtifact,
     synthesizer: TermSynthesizer,
@@ -182,9 +208,7 @@ def build_synthetic_references(
     if language_code is not None:
         supported_codes = KOKORO_LANGUAGE_CODES.get(language)
         if supported_codes is None:
-            raise ValueError(
-                f"Kokoro-82M does not support terminology language {language!r}."
-            )
+            raise ValueError(f"Kokoro-82M does not support terminology language {language!r}.")
         if str(language_code) not in supported_codes:
             choices = ", ".join(sorted(supported_codes))
             raise ValueError(
@@ -197,17 +221,29 @@ def build_synthetic_references(
     references: list[ReferencePronunciation] = []
     provenance = synthesizer.provenance
     for entry in selected:
-        identity = f"{entry.concept_id}|{entry.term}|{language}|{provenance}"
-        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+        reference_id, _ = synthetic_reference_identity(
+            concept_id=entry.concept_id,
+            term=entry.term,
+            language=language,
+            curated_phonemes=entry.pronunciations[0] if entry.pronunciations else None,
+            terminology_release=artifact.artifact_version,
+            tts_model_revision=str(
+                provenance.get("tts_model_revision")
+                or provenance.get("tts_model_id")
+                or "unresolved"
+            ),
+            g2p_revision=str(provenance.get("g2p_revision") or "kokoro-bundled-unresolved"),
+            voice=str(provenance.get("tts_voice") or "unresolved"),
+            speed=float(provenance.get("tts_speed") or 1.0),
+            sample_rate=int(provenance.get("tts_sample_rate") or 24_000),
+        )
         slug = _safe_slug(entry.term)
-        reference_id = f"kokoro-{slug}-{digest}"
-        audio_path = output_dir / f"{reference_id}.wav"
+        audio_path = output_dir / f"kokoro-{slug}-{reference_id[:20]}.wav"
         curated_phonemes = entry.pronunciations[0] if entry.pronunciations else None
         result = None
         if overwrite or not audio_path.is_file():
-            result = synthesizer.synthesize(
-                entry.term, audio_path, phonemes=curated_phonemes
-            )
+            result = synthesizer.synthesize(entry.term, audio_path, phonemes=curated_phonemes)
+        audio_sha256 = sha256_file(audio_path)
         references.append(
             ReferencePronunciation(
                 reference_id=reference_id,
@@ -217,18 +253,19 @@ def build_synthetic_references(
                 language=entry.language,
                 pronunciation_type="synthetic_tts",
                 source="kokoro_local_synthetic_reference",
-                concept_type="medical_term",
+                concept_type=entry.concept_type,
                 synthetic=True,
                 tts_model_id=_optional_string(provenance.get("tts_model_id")),
                 tts_voice=_optional_string(provenance.get("tts_voice")),
                 tts_language_code=_optional_string(provenance.get("tts_language_code")),
-                tts_phonemes=(
-                    result.phonemes if result is not None else curated_phonemes
-                ),
+                tts_phonemes=(result.phonemes if result is not None else curated_phonemes),
                 tts_sample_rate=_optional_int(provenance.get("tts_sample_rate")),
                 tts_speed=_optional_float(provenance.get("tts_speed")),
                 terminology_version=artifact.artifact_version,
                 terminology_source_sha256=artifact.source_sha256,
+                identity_schema_version=1,
+                rendition_id=audio_sha256,
+                audio_sha256=audio_sha256,
             )
         )
     if not references:
@@ -236,9 +273,7 @@ def build_synthetic_references(
     return references
 
 
-def write_reference_manifest(
-    references: list[ReferencePronunciation], manifest_path: Path
-) -> None:
+def write_reference_manifest(references: list[ReferencePronunciation], manifest_path: Path) -> None:
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     lines = []
     for reference in references:

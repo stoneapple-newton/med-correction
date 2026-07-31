@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "description": "Review-only medical-term correction demo using unchanged source audio and synthetic transcript substitutions.",
+  "safety": {
+    "synthetic_mistranscriptions": true,
+    "source_audio_modified": false,
+    "auto_commit_expected": false
+  },
+  "cases": [
+    {
+      "id": "english_amlodipine",
+      "language": "English",
+      "locale": "en-US",
+      "audio_clip": "data/audio/term-correction-demo/english_amlodipine.wav",
+      "audio_clip_sha256": "088d3f2a49768095eb5d5715790c772889a83bac763c8003f53dfebc79e05154",
+      "source_audio": "C:/Users/Newto/Documents/project/med-audio-transcript/med-audio-transcription/output/Z37UviMBXfk - Pharmacology Made Easy (Part 1) - Common Medication Endings Picmonic Nursing.wav",
+      "source_transcript": "C:/Users/Newto/Documents/project/med-audio-transcript/med-audio-transcription/output/Z37UviMBXfk - Pharmacology Made Easy (Part 1) - Common Medication Endings Picmonic Nursing.transcript.txt",
+      "source_start": "00:13:31.000",
+      "source_end": "00:13:41.000",
+      "original_transcript_file": "demo/term-correction/english.original.txt",
+      "mistranscribed_transcript_file": "demo/term-correction/english.mistranscribed.txt",
+      "original_term": "amlodipine",
+      "synthetic_mistranscription": "am low dipine",
+      "expected_concept_id": "RxCUI:596",
+      "expected_term": "amlodipine"
+    },
+    {
+      "id": "chinese_hypertension",
+      "language": "Chinese",
+      "locale": "zh-CN",
+      "audio_clip": "data/audio/term-correction-demo/chinese_hypertension.wav",
+      "audio_clip_sha256": "9d9872ed7328cbdb5eaaf5e7f1cca5a86d26fbfe97794f47a911ae9941ca95f0",
+      "source_audio": "C:/Users/Newto/Documents/project/med-audio-transcript/med-audio-transcription/output/yxeTdZF8FRY - 杨兰泽鑫：饮食干预改善糖尿病 - 研讨会（讲座）【跨界席谈·第一期】2022-3-5.wav",
+      "source_transcript": "C:/Users/Newto/Documents/project/med-audio-transcript/med-audio-transcription/output/yxeTdZF8FRY - 杨兰泽鑫：饮食干预改善糖尿病 - 研讨会（讲座）【跨界席谈·第一期】2022-3-5.transcript.txt",
+      "source_start": "00:11:12.000",
+      "source_end": "00:11:22.000",
+      "original_transcript_file": "demo/term-correction/chinese.original.txt",
+      "mistranscribed_transcript_file": "demo/term-correction/chinese.mistranscribed.txt",
+      "original_term": "高血压",
+      "synthetic_mistranscription": "高血鸭",
+      "expected_concept_id": "LOCAL:hypertension",
+      "expected_term": "高血压"
+    }
+  ]
+}

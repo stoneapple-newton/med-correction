@@ -63,6 +63,9 @@ medterm-tts-build = "medterm.tts_cli:build_command"
 medterm-register-source = "medterm.bulk_cli:register_source_command"
 medterm-import-terminology = "medterm.bulk_cli:import_terminology_command"
 medterm-finalize-dictionary = "medterm.bulk_cli:finalize_dictionary_command"
+medterm-vector-batch = "medterm.vector_batch_cli:vector_batch_command"
+medterm-finalize-index = "medterm.vector_batch_cli:finalize_index_command"
+medterm-medrag-batch = "medterm.medrag_batch_cli:batch_command"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/medterm"]

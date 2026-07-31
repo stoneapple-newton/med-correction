@@ -187,3 +187,18 @@ def test_projection_training_writes_auditable_checkpoint(tmp_path: Path) -> None
     assert checkpoint["output_size"] == 2
     assert checkpoint["training_provenance"]["dataset"] == "synthetic-unit-test"
     assert np.isfinite(summary["final_loss"])
+
+
+def test_masked_statistics_pooling_excludes_padding() -> None:
+    torch = pytest.importorskip("torch")
+    from medterm.audio_embeddings import SpeechContentEncoder
+
+    encoder = SpeechContentEncoder()
+    encoder._torch = torch
+    hidden = torch.tensor([[[1.0], [3.0], [100.0]], [[2.0], [4.0], [6.0]]])
+    mask = torch.tensor([[1, 1, 0], [1, 1, 1]], dtype=torch.bool)
+
+    pooled = encoder._pool(hidden, mask)
+
+    assert torch.allclose(pooled[:, 0], torch.tensor([2.0, 4.0]))
+    assert torch.allclose(pooled[:, 1], torch.tensor([1.0, 1.6329932]), atol=1e-6)

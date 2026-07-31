@@ -37,6 +37,9 @@ class ReferencePronunciation(BaseModel):
     tts_speed: float | None = None
     terminology_version: str | None = None
     terminology_source_sha256: str | None = None
+    identity_schema_version: int | None = None
+    rendition_id: str | None = None
+    audio_sha256: str | None = None
 
 
 class AudioCandidate(BaseModel):
@@ -61,6 +64,8 @@ class AudioEncoder(Protocol):
     def provenance(self) -> dict[str, Any]: ...
 
     def encode(self, audio_path: Path) -> np.ndarray: ...
+
+    def encode_many(self, audio_paths: list[Path]) -> np.ndarray: ...
 
 
 @dataclass(frozen=True)
@@ -122,6 +127,47 @@ class SpeechContentEncoder:
         self._output_dimension = int(result.shape[0])
         return result
 
+    def encode_many(self, audio_paths: list[Path]) -> np.ndarray:
+        """Encode a duration-bucketed batch while excluding padded feature frames from pooling."""
+        if not audio_paths:
+            raise ValueError("audio_paths must not be empty.")
+        self._load_model()
+        waveforms = [self._load_waveform(path) for path in audio_paths]
+        ordered = sorted(range(len(waveforms)), key=lambda index: waveforms[index].size)
+        sorted_waveforms = [waveforms[index] for index in ordered]
+        inputs = self._feature_extractor(
+            sorted_waveforms,
+            sampling_rate=self.config.sample_rate,
+            padding=True,
+            return_attention_mask=True,
+            return_tensors="pt",
+        )
+        model_dtype = next(self._model.parameters()).dtype
+        prepared = {}
+        for key, value in inputs.items():
+            value = value.to(self._device)
+            if value.is_floating_point() and key != "attention_mask":
+                value = value.to(model_dtype)
+            prepared[key] = value
+        torch = self._torch
+        with torch.inference_mode():
+            hidden = self._model(**prepared).last_hidden_state
+            feature_mask = self._feature_attention_mask(
+                hidden.shape[1], prepared.get("attention_mask")
+            )
+            pooled = self._pool(hidden, feature_mask)
+            if self._projection is not None:
+                pooled = self._projection(pooled)
+            vectors = torch.nn.functional.normalize(pooled.float(), dim=-1)
+        matrix = vectors.detach().cpu().numpy().astype(np.float32, copy=False)
+        inverse = np.empty(len(ordered), dtype=np.int64)
+        inverse[np.asarray(ordered)] = np.arange(len(ordered))
+        matrix = matrix[inverse]
+        if not np.all(np.isfinite(matrix)):
+            raise InvalidAudioError("A batched embedding contains non-finite values.")
+        self._output_dimension = int(matrix.shape[1])
+        return matrix
+
     def extract_pooled(self, audio_path: Path) -> np.ndarray:
         """Return unprojected pooled features for projection-head training."""
         pooled = self._encode_pooled_tensor(audio_path)
@@ -150,11 +196,30 @@ class SpeechContentEncoder:
             hidden = self._model(**prepared).last_hidden_state
             return self._pool(hidden)
 
-    def _pool(self, hidden: Any) -> Any:
-        mean = hidden.mean(dim=1)
+    def _feature_attention_mask(self, feature_length: int, sample_mask: Any | None) -> Any | None:
+        if sample_mask is None:
+            return None
+        if hasattr(self._model, "_get_feature_vector_attention_mask"):
+            return self._model._get_feature_vector_attention_mask(feature_length, sample_mask)
+        lengths = sample_mask.sum(dim=-1)
+        scaled = self._torch.ceil(lengths * feature_length / sample_mask.shape[1]).long()
+        positions = self._torch.arange(feature_length, device=sample_mask.device)
+        return positions.unsqueeze(0) < scaled.unsqueeze(1)
+
+    def _pool(self, hidden: Any, attention_mask: Any | None = None) -> Any:
+        if attention_mask is None:
+            mean = hidden.mean(dim=1)
+            variance = hidden.float().var(dim=1, unbiased=False)
+        else:
+            mask = attention_mask.unsqueeze(-1).to(hidden.dtype)
+            count = mask.sum(dim=1).clamp_min(1)
+            mean = (hidden * mask).sum(dim=1) / count
+            variance = (((hidden - mean.unsqueeze(1)).float() ** 2) * mask.float()).sum(
+                dim=1
+            ) / count.float()
         if self.config.pooling == "mean":
             return mean
-        std = hidden.float().std(dim=1, unbiased=False).to(hidden.dtype)
+        std = variance.sqrt().to(hidden.dtype)
         return self._torch.cat([mean, std], dim=-1)
 
     def _load_model(self) -> None:
@@ -189,6 +254,11 @@ class SpeechContentEncoder:
         self._model_revision = getattr(model.config, "_commit_hash", None)
         if self.config.projection_checkpoint is not None:
             self._projection = self._load_projection(self.config.projection_checkpoint)
+        else:
+            hidden_size = int(model.config.hidden_size)
+            self._output_dimension = (
+                hidden_size if self.config.pooling == "mean" else hidden_size * 2
+            )
 
     def _load_projection(self, path: Path) -> Any:
         if not path.is_file():
@@ -211,6 +281,7 @@ class SpeechContentEncoder:
         module.eval().to(self._device)
         if self._device.startswith("cuda") and self.config.use_half_on_cuda:
             module.half()
+        self._output_dimension = int(checkpoint["output_size"])
         return module
 
     def _load_waveform(self, audio_path: Path) -> np.ndarray:
@@ -470,7 +541,12 @@ def build_reference_index(
 ) -> AudioEmbeddingIndex:
     if not references:
         raise ValueError("Reference manifest is empty.")
-    vectors = [encoder.encode(reference.audio_path) for reference in references]
+    encode_many = getattr(encoder, "encode_many", None)
+    if callable(encode_many):
+        matrix = np.asarray(encode_many([reference.audio_path for reference in references]))
+        vectors = [row for row in matrix]
+    else:
+        vectors = [encoder.encode(reference.audio_path) for reference in references]
     dimensions = {vector.shape for vector in vectors}
     if len(dimensions) != 1:
         raise ValueError("All reference embeddings must have the same dimension.")

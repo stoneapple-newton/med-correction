@@ -14,7 +14,8 @@ sample. Production use requires a licensed, validated terminology release and cl
 
 - Versioned offline dictionary builds from CSV/JSON, including aliases, provenance, language,
   risk tier, priors, and curated pronunciations.
-- RxNorm `RXNCONSO.RRF` conversion for building a larger source file from an official release.
+- License-gated, release-scoped RxNorm streaming import with disk-backed alias grouping,
+  deterministic shards, checksums, resumable checkpoints, and dictionary finalization.
 - Loss-minimizing Unicode normalization and structured extraction of strength, route, and dosage
   form tokens.
 - Script detection and a fastText `lid.176` adapter with an explicit script-based fallback.
@@ -157,16 +158,32 @@ uv run medterm-build --source data/source_terms.csv `
   --output data/artifacts/dictionary.json --version local_2026_07_v1
 ```
 
-For an official extracted RxNorm release:
+For an approved official extracted RxNorm release, register its checksum and reviewed license
+evidence before importing it:
 
 ```powershell
-uv run python scripts/import_rxnorm.py C:\rxnorm\rrf\RXNCONSO.RRF data/rxnorm_terms.csv
-uv run medterm-build --source data/rxnorm_terms.csv --output data/artifacts/dictionary.json
+uv run medterm-register-source `
+  --source C:\rxnorm\rrf\RXNCONSO.RRF --release-id rxnorm-YYYYMMDD `
+  --source-release YYYYMMDD --license-status approved_for_local_processing `
+  --license-approval-id <approval-id> --license-owner <owner> `
+  --license-evidence <evidence-reference> --license-approval-date YYYY-MM-DD
+
+uv run medterm-import-terminology `
+  --manifest data/builds/rxnorm-YYYYMMDD/source/source_manifest.json `
+  --output data/builds/rxnorm-YYYYMMDD/import --batch-size 25000 --resume
+
+uv run medterm-finalize-dictionary `
+  --import-dir data/builds/rxnorm-YYYYMMDD/import `
+  --output data/builds/rxnorm-YYYYMMDD/terminology
 ```
 
 RxNorm and UMLS source licenses and release terms must be reviewed before distribution. Add
 RxTerms/local formulary aliases to the same source schema and validate critical pronunciations
 with a clinical reviewer.
+
+Imported concepts default to `risk_tier=unclassified` and `lasa_status=unclassified`; they are not
+silently treated as standard risk. A `--max-concepts` run is always labeled partial, scans the
+registered source for aliases of selected concepts, and cannot resume as a full build.
 
 ## Optional model adapters
 
@@ -408,6 +425,62 @@ Synthetic speech is not a validated human pronunciation corpus and must not be r
 one. These vectors are development references for candidate retrieval and projection experiments;
 they require held-out evaluation on approved human recordings. Retrieval remains `review` or
 `abstain`, and `auto_commit_enabled` remains `false`.
+
+For a release-scoped active-reference manifest, create resumable vector shards and finalize a
+language-specific index:
+
+```powershell
+uv run medterm-vector-batch `
+  --manifest data/builds/<release-id>/tts/en/active_references.jsonl `
+  --output data/builds/<release-id>/vectors/en `
+  --micro-batch-size 32 --shard-size 5000 --device cuda --resume
+
+uv run medterm-finalize-index `
+  --vectors data/builds/<release-id>/vectors/en `
+  --output data/builds/<release-id>/indexes/kokoro_vectors_en.npz
+```
+
+The encoder duration-orders waveforms within each batch, forwards attention masks, and excludes
+padded feature frames from pooling. Finalization rejects duplicate, zero, non-finite, corrupt, or
+dimension-incompatible vectors. CUDA out-of-memory retry splits only the affected micro-batch and
+does not change the encoder or projection configuration.
+
+The release lifecycle is being implemented in phases. Source registration, streaming RxNorm
+import, dictionary finalization, canonical TTS reference/rendition identity, batched encoding,
+vector shards, index finalization, and the release-scoped med-rag batch runner are implemented.
+Publication/revocation and garbage collection remain proposed and must not be represented as
+available commands.
+
+For the registered local med-rag snapshot, export a deterministic SQLite slice without starting
+the expensive TTS/vector stages:
+
+```powershell
+$root = "data/builds/med-rag-official-local-v1"
+$database = "C:/Users/Newto/Documents/project/med-rag/data/medical_terms.sqlite"
+$checksum = "db88ef38e04b650efb7a4b81cdbe3a21ca6c335facd05c271e8e99f92537d642"
+
+uv run medterm-medrag-batch `
+  --stage export `
+  --sqlite $database `
+  --expected-sqlite-sha256 $checksum `
+  --build-root $root `
+  --release-id med-rag-official-local-v1 `
+  --batch-id batch-000003-5000 `
+  --source-language en `
+  --offset 5500 `
+  --limit 5000
+```
+
+Run the same immutable arguments with `--stage tts`, then `--stage vectors`, or use `--stage all`
+for a new batch. Defaults match the handoff: English `a`/`af_heart`, Mandarin
+`z`/`zf_xiaobei`, CUDA, statistics pooling, vector micro-batches of 16, shards of 5,000, and TTS
+checkpoints every 500 terms. Use `--source-language zh-Hans` for the registered Chinese source;
+the export retains `zh-Hans` in provenance and writes `zh` only to generated artifacts. A reused
+batch ID is rejected if its source checksum, offset, limit, language, release, or policy differs.
+
+See [the bulk structure evaluation plan](docs/bulk_structure_evaluation_plan.md) for interruption,
+resume, resource, pronunciation-review, held-out human-audio retrieval, reconciliation, and
+release-gate requirements.
 
 Build every Kokoro-supported language present in the bundled terminology with the PowerShell
 runner:
